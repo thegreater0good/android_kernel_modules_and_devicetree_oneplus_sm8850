@@ -16,10 +16,6 @@
 #include <linux/wait.h>
 #include <linux/memcontrol.h>
 #include <linux/mutex.h>
-#include "mm_osvelte/mm-trace.h"
-
-static unsigned long total_reclaimed = 0;
-module_param_named(total_reclaimed, total_reclaimed, ulong, S_IRUGO | S_IWUSR);
 
 #define SHRINK_SLABD_NAME "kshrink_slabd"
 extern unsigned long shrink_slab(gfp_t gfp_mask, int nid,
@@ -29,21 +25,14 @@ extern unsigned long shrink_slab(gfp_t gfp_mask, int nid,
 static int kshrink_slabd_pid;
 static struct task_struct *shrink_slabd_tsk = NULL;
 static bool async_shrink_slabd_setup = false;
-
-#define WAKEUP_INTERVAL (HZ / 10) /* 100ms */
-#define WATERMARK_UPDATE_INTERVAL (HZ * 60) /* 60s */
-#define SHRINK_SLAB_THRESHOLD ((100 << 20) / PAGE_SIZE) /* 100M */
-#define MIN_RECLAIMED_PER_ROUND ((5 << 20) / PAGE_SIZE) /* 5M */
-#define MAX_RETRY 10
 #define FILE_CACHE_LOW_LIMIT ((SZ_256M) / PAGE_SIZE) /* 256m */
-static unsigned long kshrink_slabd_last_jiffies = 0;
 
 wait_queue_head_t shrink_slabd_wait;
 
 struct async_slabd_parameter {
 	struct mem_cgroup *shrink_slabd_memcg;
 	gfp_t shrink_slabd_gfp_mask;
-	int shrink_slabd_pending;
+	int shrink_slabd_runnable;
 	int shrink_slabd_nid;
 	int priority;
 	struct reclaim_state *reclaim_state;
@@ -83,21 +72,6 @@ static bool file_and_cache_is_low(void)
 	return false;
 }
 
-/* brief estimate of all reclaimable pages */
-static unsigned long nr_slab_reclaimable(void)
-{
-	return global_node_page_state(NR_KERNEL_MISC_RECLAIMABLE);
-}
-
-static bool should_wakeup(void)
-{
-	if ((nr_slab_reclaimable() >> asp.priority) > SHRINK_SLAB_THRESHOLD ||
-			time_is_before_jiffies(kshrink_slabd_last_jiffies + WAKEUP_INTERVAL))
-		return true;
-	else
-		return false;
-}
-
 bool wakeup_shrink_slabd(gfp_t gfp_mask, int nid,
 				 struct mem_cgroup *memcg,
 				 int priority)
@@ -108,128 +82,22 @@ bool wakeup_shrink_slabd(gfp_t gfp_mask, int nid,
 	if (!mutex_trylock(&async_shrink_slab_mutex))
 		return true;
 
-	/*
-	 * 2 special cases:
-	 * 1. A new shrink_slab request is pending but hasn't started yet. That's because of
-	 *    unmet wake-up condition or schedule latency of kshrink_slabd. We should update
-	 *    the priority if needed.
-	 * 2. kshrink_slabd is running. Then just abort wakeup attempt here.
-	*/
-	if (asp.shrink_slabd_pending == 1) {
-		/* case 1 */
-		if (priority < asp.priority)
-			asp.priority = priority;
-		goto check_wakeup;
-	}
-
-	if (!waitqueue_active(&shrink_slabd_wait)) {
-		/* case 2 */
+	if (asp.shrink_slabd_runnable == 1) {
 		mutex_unlock(&async_shrink_slab_mutex);
 		return true;
 	}
-
 	async_reclaim_state.reclaimed = 0;
 	asp.reclaim_state = &async_reclaim_state;
-	asp.shrink_slabd_gfp_mask = GFP_KERNEL;
+	asp.shrink_slabd_gfp_mask = gfp_mask;
 	asp.shrink_slabd_nid = nid;
-	asp.shrink_slabd_memcg = root_mem_cgroup;
+	asp.shrink_slabd_memcg = memcg;
 	asp.priority = priority;
-	asp.shrink_slabd_pending = 1;
-	css_get(&root_mem_cgroup->css);
-check_wakeup:
-	if (waitqueue_active(&shrink_slabd_wait) && should_wakeup())
-		wake_up_interruptible(&shrink_slabd_wait);
+	asp.shrink_slabd_runnable = 1;
+	css_get(&memcg->css);
 	mutex_unlock(&async_shrink_slab_mutex);
 
+	wake_up_interruptible(&shrink_slabd_wait);
 	return true;
-}
-
-void set_async_slabd_cpus(void)
-{
-	struct cpumask mask;
-	struct cpumask *cpumask = &mask;
-	pg_data_t *pgdat = NODE_DATA(0);
-	unsigned int cpu = 0, cpufreq_max_tmp = 0;
-	struct cpufreq_policy *policy_max;
-	static bool set_slabd_cpus_success = false;
-
-	if (unlikely(!async_shrink_slabd_setup))
-		return;
-
-	if (likely(set_slabd_cpus_success))
-		return;
-	for_each_possible_cpu(cpu) {
-		struct cpufreq_policy *policy = cpufreq_cpu_get(cpu);
-
-		if (policy == NULL)
-			continue;
-
-		if (policy->cpuinfo.max_freq >= cpufreq_max_tmp) {
-			cpufreq_max_tmp = policy->cpuinfo.max_freq;
-			policy_max = policy;
-		}
-	}
-
-	cpumask_copy(cpumask, cpumask_of_node(pgdat->node_id));
-	cpumask_andnot(cpumask, cpumask, policy_max->related_cpus);
-
-	if (!cpumask_empty(cpumask)) {
-		set_cpus_allowed_ptr(shrink_slabd_tsk, cpumask);
-		set_slabd_cpus_success = true;
-	}
-}
-
-struct pglist_data *first_online_pgdat(void)
-{
-	return NODE_DATA(first_online_node);
-}
-
-struct pglist_data *next_online_pgdat(struct pglist_data *pgdat)
-{
-	int nid = next_online_node(pgdat->node_id);
-
-	if (nid == MAX_NUMNODES)
-		return NULL;
-	return NODE_DATA(nid);
-}
-
-struct zone *next_zone(struct zone *zone)
-{
-	pg_data_t *pgdat = zone->zone_pgdat;
-
-	if (zone < pgdat->node_zones + MAX_NR_ZONES - 1)
-		zone++;
-	else {
-		pgdat = next_online_pgdat(pgdat);
-		if (pgdat)
-			zone = pgdat->node_zones;
-		else
-			zone = NULL;
-	}
-	return zone;
-}
-
-static unsigned long long get_high_watermark(void)
-{
-	static unsigned long last_update = 0;
-	static unsigned long long high_wm = 0;
-
-	if (unlikely(time_is_before_jiffies(last_update + WATERMARK_UPDATE_INTERVAL))) {
-		struct zone *zone = NULL;
-		high_wm = 0;
-		for_each_zone(zone) {
-			high_wm += high_wmark_pages(zone);
-		}
-		last_update = jiffies;
-	}
-
-	return high_wm;
-}
-
-static bool kshrink_slabd_should_continue(unsigned long last_reclaimed)
-{
-	return (last_reclaimed > MIN_RECLAIMED_PER_ROUND) &&
-			(global_zone_page_state(NR_FREE_PAGES) < get_high_watermark());
 }
 
 static int kshrink_slabd_func(void *p)
@@ -256,36 +124,23 @@ static int kshrink_slabd_func(void *p)
 	asp.shrink_slabd_gfp_mask = 0;
 	asp.shrink_slabd_nid = 0;
 	asp.shrink_slabd_memcg = NULL;
-	asp.shrink_slabd_pending = 0;
+	asp.shrink_slabd_runnable = 0;
 	asp.priority = 0;
 
 	while (!kthread_should_stop()) {
-		unsigned long reclaimed;
-		int retry;
-		wait_event_freezable(shrink_slabd_wait, asp.shrink_slabd_pending == 1);
-		retry = 0;
-
-		set_async_slabd_cpus();
-
+		wait_event_freezable(shrink_slabd_wait, asp.shrink_slabd_runnable == 1);
 		mutex_lock(&async_shrink_slab_mutex);
 		set_task_reclaim_state(current, asp.reclaim_state);
 		nid = asp.shrink_slabd_nid;
 		gfp_mask = asp.shrink_slabd_gfp_mask;
 		priority = asp.priority;
 		memcg = asp.shrink_slabd_memcg;
-		asp.shrink_slabd_pending = 0;
+		asp.shrink_slabd_runnable = 0;
 		mutex_unlock(&async_shrink_slab_mutex);
 
-		do {
-			mm_trace_fmt_begin("priority=%d, nr_reclaimable=%lu", priority, nr_slab_reclaimable());
-			reclaimed = shrink_slab(gfp_mask, nid, memcg, priority);
-			mm_trace_fmt_end();
-			total_reclaimed += reclaimed;
-			mm_trace_int64("kshrink_slabd_reclaimed", total_reclaimed);
-		} while (kshrink_slabd_should_continue(reclaimed) && (++retry < MAX_RETRY));
+		shrink_slab(gfp_mask, nid, memcg, priority);
 		css_put(&memcg->css);
 		set_task_reclaim_state(current, NULL);
-		kshrink_slabd_last_jiffies = jiffies;
 	}
 	current->flags &= ~(PF_MEMALLOC | PF_KSWAPD);
 	current->reclaim_state = NULL;

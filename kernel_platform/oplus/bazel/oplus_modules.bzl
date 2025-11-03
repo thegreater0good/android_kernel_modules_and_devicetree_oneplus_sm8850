@@ -77,6 +77,7 @@ def define_oplus_ddk_modules(target, msm_target, variant):
         "//vendor/oplus/kernel/mm:oplus_bsp_kshrink_slabd",
         "//vendor/oplus/kernel/mm:oplus_bsp_kswapd_opt",
         "//vendor/oplus/kernel/mm:oplus_bsp_memleak_detect",
+        "//vendor/oplus/kernel/mm:oplus_bsp_zstdn",
         "//vendor/oplus/kernel/mm:oplus_bsp_mm_osvelte",
         "//vendor/oplus/kernel/mm:oplus_bsp_pcppages_opt",
         "//vendor/oplus/kernel/mm:oplus_bsp_proactive_compact",

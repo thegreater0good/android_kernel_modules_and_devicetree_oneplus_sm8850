@@ -828,6 +828,7 @@ static const char * const bg_kthread_comm[] = {
 	/* no support numa for now */
 	"kswapd0",
 	"kcompactd0",
+	"kshrink_slabd",
 };
 
 static void iter_kthread_and_show(struct seq_file *s,
