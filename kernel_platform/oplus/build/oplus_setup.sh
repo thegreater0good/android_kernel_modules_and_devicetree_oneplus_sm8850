@@ -9,7 +9,6 @@ function init_build_environment() {
     export OPLUS_VND_BUILD_PLATFORM=SM8850
     export ANDROID_PRODUCT_OUT=${TOPDIR}/out/target/product/$variants_platform
     export TARGET_BOARD_PLATFORM=$variants_platform
-    source vendor/oplus/kernel/prebuilt/vendorsetup.sh
 
     ACKDIR=${TOPDIR}/kernel_platform
     TOOLS=${ACKDIR}/oplus/tools

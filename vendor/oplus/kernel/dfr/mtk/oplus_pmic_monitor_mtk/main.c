@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*===========================================================================
-#  Copyright (c) 2021, OPPO Technologies Inc. All rights reserved.
+#  Copyright (c) 2021, OPLUS Technologies Inc. All rights reserved.
 ===========================================================================
 
                               EDIT HISTORY

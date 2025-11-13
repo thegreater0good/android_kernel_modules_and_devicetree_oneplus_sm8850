@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*===========================================================================
-#  Copyright (c) 2021, OPPO Technologies Inc. All rights reserved.
+#  Copyright (c) 2021, OPLUS Technologies Inc. All rights reserved.
 ===========================================================================
 
                               EDIT HISTORY
@@ -25,10 +25,10 @@
 #include <linux/of.h>
 #include "oplus_pmic_info_mtk.h"
 #define PMIC_INFO_SECTOR_START_UFS  (1161*4096)
-#define OPPO_PARTITION_OPPORESERVE_1                      "/dev/block/by-name/opporeserve1"
-#define OPPO_PARTITION_OPLUSRESERVE_1                     "/dev/block/by-name/oplusreserve1"
-#define OPPORESERVER1_PATH                               (!access(OPPO_PARTITION_OPPORESERVE_1, 0) ? OPPO_PARTITION_OPPORESERVE_1 : OPPO_PARTITION_OPLUSRESERVE_1 )
-//#define OPPORESERVER1_PATH                                OPPO_PARTITION_OPLUSRESERVE_1
+#define OPLUS_PARTITION_OPPORESERVE_1                      "/dev/block/by-name/opporeserve1"
+#define OPLUS_PARTITION_OPLUSRESERVE_1                     "/dev/block/by-name/oplusreserve1"
+#define OPPORESERVER1_PATH                               (!access(OPLUS_PARTITION_OPPORESERVE_1, 0) ? OPLUS_PARTITION_OPPORESERVE_1 : OPLUS_PARTITION_OPLUSRESERVE_1 )
+//#define OPPORESERVER1_PATH                                OPLUS_PARTITION_OPLUSRESERVE_1
 
 static struct PMICHistoryKernelStruct PMICHistory;
 static struct PMICHistoryKernelStruct *format = NULL;

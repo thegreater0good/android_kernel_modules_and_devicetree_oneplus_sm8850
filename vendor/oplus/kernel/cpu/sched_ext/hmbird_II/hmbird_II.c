@@ -19,7 +19,7 @@
 #include <trace/hooks/sched.h>
 #include <trace/events/task.h>
 MODULE_LICENSE("GPL v2");
-MODULE_AUTHOR("OPPO KERNEL III TEAM");
+MODULE_AUTHOR("OPLUS KERNEL III TEAM");
 MODULE_VERSION("1.0");
 #define wlog(fmt, ...)	pr_err(fmt, ##__VA_ARGS__)
 

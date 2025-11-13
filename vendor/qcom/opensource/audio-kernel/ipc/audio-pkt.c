@@ -637,7 +637,12 @@ static int audio_pkt_srvc_callback(struct gpr_device *adev,
 
 	skb = alloc_skb(pkt_size, GFP_ATOMIC);
 	if (!skb) {
+#ifdef OPLUS_ARCH_EXTENDS
+/*Modify for not feeback fail before try backup*/
+		dev_info(&adev->dev, "%s: alloc_skb failed pkt_size %d\n", __func__, pkt_size);
+#else /* OPLUS_ARCH_EXTENDS */
 		dev_err(&adev->dev, "%s: alloc_skb failed pkt_size %d\n", __func__, pkt_size);
+#endif /* OPLUS_ARCH_EXTENDS */
 		skb = audio_pkt_get_backup();
 		if (!skb) {
 			dev_err(&adev->dev, "%s: get backup skb buffers failed\n",
