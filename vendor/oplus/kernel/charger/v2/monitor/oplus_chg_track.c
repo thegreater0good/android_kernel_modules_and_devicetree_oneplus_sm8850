@@ -2012,9 +2012,12 @@ int oplus_chg_track_time_zone_get(char *buf)
 	struct oplus_chg_track_status *track_status;
 
 	track_chip = g_track_chip;
+	if (!track_chip)
+		return -1;
+
 	track_status = &track_chip->track_status;
-	if (!track_chip || !track_status)
-                return -1;
+	if (!track_status)
+		return -1;
 
 	return sprintf(buf, "%d\n", track_status->track_gmtoff);
 }

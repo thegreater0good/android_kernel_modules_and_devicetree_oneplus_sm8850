@@ -31,7 +31,7 @@
 			socd_trip: socd-trip {
 /* #ifdef OPLUS_FEATURE_CHG_BASIC */
 /* thershold: 3% power */
-				temperature = <97>;
+				temperature = <95>;
 /* #else */
 				/* temperature = <90>; */
 /* #endif */

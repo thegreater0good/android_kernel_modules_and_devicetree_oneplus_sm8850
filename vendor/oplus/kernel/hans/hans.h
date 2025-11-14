@@ -40,6 +40,8 @@
 /*FROZEN BINDER CHECK POLICY*/
 #define FROZEN_BINDER_UID (0)
 #define FROZEN_BINDER_ALL (2)
+/* If the synchronous Binder has not completed after more than 30 minutes, the transbinder check will filter it out. */
+#define INCOMING_TRANSACTION_IGNORE_TIME (1800000)
 
 #define HANS_FAMILY_VERSION  1
 #define HANS_FAMILY  "oplus_hans"

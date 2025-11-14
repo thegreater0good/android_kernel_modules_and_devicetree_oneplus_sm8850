@@ -55,6 +55,7 @@
 #define UFCS_ADSP_TEMP_SWITCH_DELAY	600
 #define UFCS_PRELIMINARY_IMP_TIME_MS	200
 #define UFCS_RESTART_TIMEOUT_MS	10000
+#define UFCS_RESET_MS			5000
 #define UFCS_START_DEF_CURR_MA_OPLUS	800
 #define UFCS_START_DEF_CURR_MA_THIRD	1000
 
@@ -403,6 +404,7 @@ struct oplus_ufcs {
 	struct delayed_work ufcs_eis_work;
 	struct delayed_work send_authdata_to_adsp_work;
 	struct delayed_work switch_end_recheck_work;
+	struct delayed_work ufcs_subsys_reset_work;
 
 	struct work_struct wired_online_work;
 	struct work_struct force_exit_work;
@@ -539,6 +541,7 @@ struct oplus_ufcs {
 	bool chg_ctrl_by_sale_mode;
 	int subboard_ntc_abnormal_current;
 	bool prot_crash;
+	bool subsys_reset_ufcs;
 	int eis_status;
 	bool lift_vbus_use_cpvout;
 	bool ufcs_dispatch_key_ok;
@@ -2151,6 +2154,7 @@ static void oplus_ufcs_variables_early_init(struct oplus_ufcs *chip)
 	chip->ss_check = false;
 	chip->fcl_trigger = false;
 	oplus_ufcs_set_ufcs_vid(chip, 0);
+	chip->subsys_reset_ufcs = false;
 }
 
 static void oplus_ufcs_variables_init(struct oplus_ufcs *chip)
@@ -2578,26 +2582,6 @@ static int oplus_ufcs_get_start_curr_min(struct oplus_ufcs *chip)
 		return UFCS_START_DEF_CURR_MA_THIRD;
 }
 
-static int oplus_ufcs_deal_third_power_info(struct oplus_ufcs *chip)
-{
-	int power_mw = 0;
-	int rc = 0;
-
-	if (NULL == chip)
-		return -EINVAL;
-
-	power_mw = chip->config.target_vbus_mv * chip->adapter_max_curr / 1000;
-
-	rc = oplus_cpa_protocol_set_power(chip->cpa_topic, CHG_PROTOCOL_UFCS, power_mw);
-	if (rc < 0) {
-		chg_err("can't set ufcs protocol power data\n");
-		return -EINVAL;
-	}
-
-	chg_info("third power set %d mw.\n", power_mw);
-	return 0;
-}
-
 static void oplus_ufcs_switch_check_work(struct work_struct *work)
 {
 	struct delayed_work *dwork = to_delayed_work(work);
@@ -2771,12 +2755,6 @@ static void oplus_ufcs_switch_check_work(struct work_struct *work)
 	}
 	vote(chip->ufcs_curr_votable, BASE_MAX_VOTER, true, max_curr, false);
 	oplus_ufcs_push_adapter_power(chip, UFCS_POWER(chip->config.target_vbus_mv, max_curr));
-
-	if (!chip->oplus_ufcs_adapter) {
-		rc = oplus_ufcs_deal_third_power_info(chip);
-		if (rc < 0)
-                        goto err;
-	}
 
 /* TODO
 	rc = oplus_ufcs_get_cable_info(chip, &chip->cable_info);
@@ -4572,7 +4550,8 @@ static int oplus_ufcs_set_fcl_curr(struct oplus_ufcs *chip)
 
 		fcl_limit = ROUND_DOWN(fcl_limit, 50);
 		if (fcl_limit)
-			vote(chip->ufcs_curr_votable, LIMIT_FCL_VOTER, true, fcl_limit, false);
+			vote(chip->ufcs_curr_votable, LIMIT_FCL_VOTER, true,
+				max(fcl_limit, oplus_ufcs_get_start_curr_min(chip)), false);
 		else
 			vote(chip->ufcs_curr_votable, LIMIT_FCL_VOTER, false, 0, false);
 	}
@@ -4636,7 +4615,7 @@ static void oplus_ufcs_monitor_work(struct work_struct *work)
 	if (!chip->ufcs_charging) {
 		rc = oplus_ufcs_charge_start(chip);
 		if (rc < 0) {
-			if (chip->ufcs_online && !chip->prot_crash) {
+			if (chip->ufcs_online && !chip->prot_crash && !chip->subsys_reset_ufcs) {
 				chg_info("rc=%d, goto next\n", rc);
 				goto next;
 			} else {
@@ -4697,7 +4676,8 @@ static void oplus_ufcs_monitor_work(struct work_struct *work)
 	return;
 
 exit:
-	oplus_ufcs_soft_exit(chip);
+	if (!chip->subsys_reset_ufcs)
+		oplus_ufcs_soft_exit(chip);
 	if (switch_to_ffc) {
 		if (is_disable_charger_vatable_available(chip))
 			vote(chip->chg_disable_votable, FASTCHG_VOTER, true, 1, false);
@@ -5251,6 +5231,20 @@ static void oplus_ufcs_restart_work(struct work_struct *work)
 		schedule_delayed_work(&chip->switch_check_work, msecs_to_jiffies(UFCS_MONITOR_CYCLE_MS));
 }
 
+static void oplus_ufcs_subsys_reset_work(struct work_struct *work)
+{
+	struct delayed_work *dwork = to_delayed_work(work);
+	struct oplus_ufcs *chip =
+		container_of(dwork, struct oplus_ufcs, ufcs_subsys_reset_work);
+	union mms_msg_data data = { 0 };
+
+	chip->subsys_reset_ufcs = false;
+	oplus_mms_get_item_data(chip->cpa_topic, CPA_ITEM_ALLOW, &data, true);
+	if (data.intval == CHG_PROTOCOL_UFCS)
+		schedule_delayed_work(&chip->switch_check_work, msecs_to_jiffies(UFCS_MONITOR_CYCLE_MS));
+}
+
+
 static void oplus_ufcs_eis_work(struct work_struct *work)
 {
 	struct delayed_work *dwork = to_delayed_work(work);
@@ -5591,8 +5585,19 @@ static void oplus_ufcs_cpa_subs_callback(struct mms_subscribe *subs,
 			oplus_mms_get_item_data(chip->cpa_topic, id, &data,
 						false);
 			chip->cpa_current_type = data.intval;
-			if (chip->cpa_current_type == CHG_PROTOCOL_UFCS)
-				schedule_delayed_work(&chip->switch_check_work, 0);
+			/* Add work delay for BC1.2 check, for the Protocol-retention 1.0 may
+			   cause switching to the UFCS error when BC1.2 is not ready. */
+			/* Todo: revert this submission when Protocol-retention 2.0 has been
+			   imported */
+			if (chip->cpa_current_type == CHG_PROTOCOL_UFCS) {
+				oplus_mms_get_item_data(chip->wired_topic, WIRED_ITEM_REAL_CHG_TYPE,
+							&data, false);
+				if (data.intval != OPLUS_CHG_USB_TYPE_UNKNOWN)
+					schedule_delayed_work(&chip->switch_check_work, 0);
+				else
+					schedule_delayed_work(&chip->switch_check_work,
+						msecs_to_jiffies(WAIT_BC1P2_GET_TYPE));
+			}
 			break;
 		case CPA_ITEM_TIMEOUT:
 			oplus_mms_get_item_data(chip->cpa_topic, id, &data,
@@ -7616,6 +7621,11 @@ static int oplus_plat_ufcs_event_notifier_call(struct notifier_block *nb, unsign
 			schedule_delayed_work(&chip->ufcs_restart_timeout_work,
 					msecs_to_jiffies(UFCS_RESTART_TIMEOUT_MS));
 		}
+		if (v != NULL && (*(int *)v == UFCS_NOTIFY_UFCS_RESET_NOTIFY)) {
+			chip->subsys_reset_ufcs = true;
+			schedule_delayed_work(&chip->ufcs_subsys_reset_work,
+					msecs_to_jiffies(UFCS_RESET_MS));
+		}
 		break;
 	case UFCS_NOTIFY_RESTART_COMM:
 		chg_info("ufcs restart occurs\n");
@@ -7777,6 +7787,7 @@ static int oplus_ufcs_probe(struct platform_device *pdev)
 	INIT_DELAYED_WORK(&chip->ufcs_eis_work, oplus_ufcs_eis_work);
 	INIT_DELAYED_WORK(&chip->send_authdata_to_adsp_work, oplus_ufcs_send_authdata_to_adsp_work);
 	INIT_DELAYED_WORK(&chip->switch_end_recheck_work, oplus_ufcs_switch_end_recheck_work);
+	INIT_DELAYED_WORK(&chip->ufcs_subsys_reset_work, oplus_ufcs_subsys_reset_work);
 	INIT_WORK(&chip->wired_online_work, oplus_ufcs_wired_online_work);
 	INIT_WORK(&chip->force_exit_work, oplus_ufcs_force_exit_work);
 	INIT_WORK(&chip->soft_exit_work, oplus_ufcs_soft_exit_work);
@@ -8071,7 +8082,9 @@ int oplus_ufcs_get_ufcs_power(struct oplus_mms *mms)
 
 	chip = oplus_mms_get_drvdata(mms);
 	if (!chip->oplus_ufcs_adapter)
-		return oplus_cpa_protocol_get_power(chip->cpa_topic, CHG_PROTOCOL_UFCS) / 1000;
+		return UFCS_POWER_TYPE_V0;
+	if (IS_ERR_OR_NULL(chip->cpa_topic))
+		return UFCS_POWER_TYPE_UNKOWN;
 
 	cpa_power = oplus_cpa_protocol_get_max_power(chip->cpa_topic) / 1000;
 	power_result = oplus_ufcs_imax_covert_power(min(chip->emark_imax, chip->power_imax), chip->config.target_vbus_mv);

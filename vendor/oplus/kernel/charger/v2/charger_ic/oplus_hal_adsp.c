@@ -1593,6 +1593,13 @@ static void oplus_request_qos_work(struct work_struct *work)
 	oplus_mms_wired_qos_request(1200);
 }
 
+static void oplus_ufcs_reset_work(struct work_struct *work)
+{
+	int ufcs_notify_val = UFCS_NOTIFY_UFCS_RESET_NOTIFY;
+
+	plat_ufcs_send_state(UFCS_NOTIFY_EXIT_COMM, (void *)&ufcs_notify_val);
+}
+
 static void oplus_release_qos_work(struct work_struct *work)
 {
 	struct battery_chg_dev *bcdev = container_of(work,
@@ -1618,6 +1625,15 @@ static void oplus_sourcecap_done_work(struct work_struct *work)
 	max_pdo_current = oplus_get_max_current_from_fixed_pdo(bcdev, OPLUS_PD_5V);
 	if (max_pdo_current >= 0)
 		oplus_chg_set_icl_by_vote(max_pdo_current, PD_PDO_ICL_VOTER);
+}
+
+static void oplus_pdo_update_work(struct work_struct *work)
+{
+	struct battery_chg_dev *bcdev = container_of(work,
+		struct battery_chg_dev, pdo_update_work.work);
+	int rc = 0;
+
+	rc = oplus_get_pps_info_from_adsp(bcdev->buck_ic, (u32 *)bcdev->pdo, PPS_PDO_MAX);
 }
 
 static void oplus_adsp_voocphy_status_func(struct work_struct *work)
@@ -3380,6 +3396,10 @@ static void handle_notification(struct battery_chg_dev *bcdev, void *data,
 		break;
 	case HMAC_UPDATE:
 		oplus_chg_ic_virq_trigger(bcdev->gauge_ic, OPLUS_IC_VIRQ_HMAC_UPDATE);
+		break;
+	case UFCS_EXIT_MODE_NOTIFY:
+		chg_info("ufcs reset notify\n");
+		schedule_delayed_work(&bcdev->ufcs_reset_work, msecs_to_jiffies(500));
 		break;
 #endif
 	default:
@@ -13766,12 +13786,14 @@ static int battery_chg_probe(struct platform_device *pdev)
 	INIT_DELAYED_WORK(&bcdev->publish_close_cp_item_work, oplus_publish_close_cp_item_work);
 	INIT_DELAYED_WORK(&bcdev->hboost_notify_work, oplus_hboost_notify_work);
 	INIT_DELAYED_WORK(&bcdev->sourcecap_done_work, oplus_sourcecap_done_work);
+	INIT_DELAYED_WORK(&bcdev->pdo_update_work, oplus_pdo_update_work);
 	INIT_DELAYED_WORK(&bcdev->sourcecap_suspend_recovery_work, oplus_sourcecap_suspend_recovery_work);
 	INIT_DELAYED_WORK(&bcdev->update_pd_svooc_work, oplus_update_pd_svooc_work);
 	INIT_DELAYED_WORK(&bcdev->iterm_timeout_work, oplus_iterm_timeout_work);
 	INIT_DELAYED_WORK(&bcdev->request_qos_work, oplus_request_qos_work);
 	INIT_DELAYED_WORK(&bcdev->release_qos_work, oplus_release_qos_work);
 	INIT_WORK(&bcdev->wired_otg_enable_work, oplus_wired_otg_enable_work);
+	INIT_DELAYED_WORK(&bcdev->ufcs_reset_work, oplus_ufcs_reset_work);
 	INIT_DELAYED_WORK(&bcdev->update_common_charge_flag_work, oplus_update_common_charge_flag_work);
 #endif
 #ifdef OPLUS_FEATURE_CHG_BASIC
@@ -13911,6 +13933,7 @@ static int battery_chg_probe(struct platform_device *pdev)
 		schedule_delayed_work(&bcdev->update_pd_svooc_work, 0);
 		schedule_delayed_work(&bcdev->plugin_irq_work, 0);
 		schedule_delayed_work(&bcdev->update_common_charge_flag_work, 0);
+		schedule_delayed_work(&bcdev->pdo_update_work, 0);
 	}
 
 	chg_info("battery_chg_probe end...\n");

@@ -3775,10 +3775,17 @@ static int oplus_chg_vg_get_gauge_car_c(struct oplus_chg_ic_dev *ic_dev, int *ca
 	struct oplus_virtual_gauge_ic *chip;
 	int i;
 	int rc = 0;
+	int num = 0;
 
 	if (ic_dev == NULL) {
 		chg_err("oplus_chg_ic_dev is NULL");
 		return -ENODEV;
+	}
+
+	rc = oplus_chg_vg_get_batt_num(ic_dev, &num);
+	if (rc < 0) {
+		chg_err("can't get battery num, rc=%d\n", rc);
+		num = 1;
 	}
 
 	chip = oplus_chg_ic_get_drvdata(ic_dev);
@@ -3796,6 +3803,7 @@ static int oplus_chg_vg_get_gauge_car_c(struct oplus_chg_ic_dev *ic_dev, int *ca
 		break;
 	}
 
+	*car_c = *car_c * num;
 	return rc;
 }
 

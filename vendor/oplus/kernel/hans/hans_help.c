@@ -6,6 +6,7 @@
 #include <linux/mutex.h>
 #include <linux/list.h>
 #include <linux/uaccess.h>
+#include <linux/ktime.h>
 #include "hans.h"
 
 struct hlist_head *binder_procs = NULL;
@@ -344,6 +345,22 @@ static void get_uid_pid(int *from_pid, int *from_uid, int *to_pid, int *to_uid, 
 	}
 }
 
+static bool is_need_check_incoming_transaction(ktime_t current_time, ktime_t start_time)
+{
+	ktime_t delta = 0;
+	if (current_time < start_time) {
+		return true;
+	} else {
+		delta = ktime_ms_delta(current_time, start_time);
+		if (delta < INCOMING_TRANSACTION_IGNORE_TIME) {
+			return true;
+		} else {
+			printk(KERN_ERR "HANS binder: incoming transaction delta time %lldms\n", delta);
+			return false;
+		}
+	}
+}
+
 /* Get detail frozen transaction binder info, controled by FW */
 void hans_check_uid_proc_status_detail(struct binder_proc *proc, enum message_type type, int to_uid)
 {
@@ -357,6 +374,7 @@ void hans_check_uid_proc_status_detail(struct binder_proc *proc, enum message_ty
 	int need_reply = -1;
 	struct binder_work *w = NULL;
 	struct list_head *fg_todo = NULL;
+	ktime_t current_time = ktime_get();
 
 	/*check binder_thread/transaction_stack/binder_proc ongoing transaction*/
 	binder_inner_proc_lock(proc);
@@ -405,7 +423,9 @@ void hans_check_uid_proc_status_detail(struct binder_proc *proc, enum message_ty
 			btrans = thread->transaction_stack;
 			if (btrans) {
 				spin_lock(&btrans->lock);
-				if (btrans->to_thread != NULL && btrans->to_thread == thread) {
+				if (btrans->to_thread != NULL
+					&& btrans->to_thread == thread
+					&& is_need_check_incoming_transaction(current_time, btrans->start_time)) {
 					/*only report incoming binder call*/
 					need_reply = (int)(!(btrans->flags & TF_ONE_WAY));
 					get_uid_pid(&from_pid, &from_uid, &to_pid, &to_uid, btrans);
@@ -517,6 +537,7 @@ static void hans_check_uid_proc_status(struct binder_proc *proc,
 	bool found = false;
 	struct binder_work *w = NULL;
 	struct list_head *fg_todo = NULL;
+	ktime_t current_time = ktime_get();
 
 	/* check binder_thread/transaction_stack/binder_proc ongoing transaction */
 	binder_inner_proc_lock(proc);
@@ -552,7 +573,7 @@ static void hans_check_uid_proc_status(struct binder_proc *proc,
 
 		if (btrans) {
 			spin_lock(&btrans->lock);
-			if (btrans->to_thread == thread) {
+			if (btrans->to_thread == thread && is_need_check_incoming_transaction(current_time, btrans->start_time)) {
 				/* only report incoming binder call */
 				spin_unlock(&btrans->lock);
 				binder_inner_proc_unlock(proc);

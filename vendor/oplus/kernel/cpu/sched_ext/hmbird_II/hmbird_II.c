@@ -71,6 +71,35 @@ void hmbird_state_systrace_c(void)
 	hmbird_II_output_systrace("C|9999|hmbird_state|%d\n", hmbird_state);
 }
 
+
+/*
+ * workaround for a bug while disable sched_ext
+ * This case is fixed in kernel 6.17 :
+ * Fix a realtime tasks starvation case where failure to enqueue a timer
+ * whose expiration time is already in the past would cause repeated
+ * attempts to re-enqueue a deadline server task which leads to starving
+ * the former, realtime one
+ * https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git/commit/?id=fe3ad7a58b581859a1a7c237b670f8bcbf5b253c
+ *
+ * Once bug is fixed, remove the workaround function
+ */
+void replenish_fair_dl_server(void)
+{
+		int cpu;
+		struct rq *rq;
+		struct rq_flags rf;
+		struct sched_dl_entity *dl_se;
+
+		for_each_possible_cpu(cpu) {
+			rq = cpu_rq(cpu);
+			rq_lock_irqsave(rq, &rf);
+			dl_se = &rq->fair_server;
+			dl_se->dl_throttled = 1;
+			dl_se->runtime = 0;
+			rq_unlock_irqrestore(rq, &rf);
+		}
+}
+
 static void android_vh_scx_ops_enable_state(void *unused, int state)
 {
 	int state_prev;
@@ -84,6 +113,11 @@ static void android_vh_scx_ops_enable_state(void *unused, int state)
 	} else {
 		hmbird_qos_request_min(&boost, FREQ_QOS_MIN_DEFAULT_VALUE);
 	}
+
+	if (state == SCX_OPS_DISABLING) {
+		replenish_fair_dl_server();
+	}
+
 	pr_info("hmbird_II: scx_ops_enable_state = %d\n", atomic_read(&hb_ops_enable_state_var));
 	if (unlikely(hmbird_debug & HMBIRD_DEBUG_SYSTRACE))
 		hmbird_state_systrace_c();

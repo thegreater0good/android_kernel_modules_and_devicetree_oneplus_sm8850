@@ -3141,6 +3141,24 @@ static u32 get_irq_bit(struct adreno_device *adreno_dev, struct kgsl_context *co
 	return 0;
 }
 
+static bool _is_kgsl_hw_fence_signaled(struct kgsl_drawobj_sync_hw_fence *hw_fence)
+{
+	struct kgsl_sync_fence *kfence = (struct kgsl_sync_fence *)hw_fence->fence;
+	struct kgsl_sync_timeline *ktimeline = kfence->parent;
+
+	if (dma_fence_is_signaled_locked(&kfence->fence))
+		return true;
+
+	/*
+	 * If we fail to get the context refcount that means this context is detached.
+	 * In that case, treat all hardware fences from detached context as signaled.
+	 */
+	if ((!hw_fence->context) && (!_kgsl_context_get(ktimeline->context)))
+		return true;
+
+	return false;
+}
+
 static void populate_kgsl_fence(struct kgsl_drawobj_sync_hw_fence *hw_fence,
 	struct hfi_syncobj *obj)
 {
@@ -3152,7 +3170,7 @@ static void populate_kgsl_fence(struct kgsl_drawobj_sync_hw_fence *hw_fence,
 
 	spin_lock_irqsave(&ktimeline->lock, flags);
 
-	if (dma_fence_is_signaled_locked(&kfence->fence) || !_kgsl_context_get(ktimeline->context))
+	if (_is_kgsl_hw_fence_signaled(hw_fence))
 		obj->flags |= BIT(GMU_SYNCOBJ_FLAG_SIGNALED_BIT);
 	else
 		hw_fence->context = ktimeline->context;
@@ -3947,10 +3965,35 @@ static void drain_context_hw_fence_cpu(struct adreno_device *adreno_dev,
 	gen8_hwsched_soccp_vote(adreno_dev, false);
 }
 
+/*
+ * destroy_detached_context_inflight_hw_fences - Destroy context's hardware fences that were
+ * dispatched to GMU
+ */
+static void destroy_detached_context_inflight_hw_fences(struct adreno_device *adreno_dev,
+	struct adreno_context *drawctxt)
+{
+	struct kgsl_device *device = KGSL_DEVICE(adreno_dev);
+	struct adreno_hw_fence_entry *entry, *tmp;
+
+	/* We don't need the drawctxt lock because this context has been detached */
+	list_for_each_entry_safe(entry, tmp, &drawctxt->hw_fence_inflight_list, node) {
+		struct gmu_context_queue_header *hdr =  drawctxt->gmu_context_queue.hostptr;
+
+		if ((timestamp_cmp((u32)entry->cmd.ts, hdr->out_fence_ts) > 0)) {
+			dev_err_ratelimited(GMU_PDEV_DEV(device),
+				"destroying detached ctx:%d unsignaled hw fence ts:%d retired:%d\n",
+				drawctxt->base.id, (u32)entry->cmd.ts, hdr->out_fence_ts);
+		}
+		adreno_hwsched_remove_hw_fence_entry(adreno_dev, entry);
+	}
+}
+
 static void drain_context_hw_fences(struct adreno_device *adreno_dev,
 	struct adreno_context *drawctxt)
 {
 	struct gen8_gmu_device *gmu = to_gen8_gmu(adreno_dev);
+
+	destroy_detached_context_inflight_hw_fences(adreno_dev, drawctxt);
 
 	if (list_empty(&drawctxt->hw_fence_list))
 		return;
@@ -4094,6 +4137,11 @@ void gen8_hwsched_context_detach(struct adreno_context *drawctxt)
 	context->gmu_registered = false;
 
 out:
+	WARN_RATELIMIT(!list_empty(&drawctxt->hw_fence_list) ||
+		!list_empty(&drawctxt->hw_fence_inflight_list),
+		"detached ctx:%u has active hw fences\n",
+		context->id);
+
 	kgsl_mutex_unlock(&device->mutex);
 }
 

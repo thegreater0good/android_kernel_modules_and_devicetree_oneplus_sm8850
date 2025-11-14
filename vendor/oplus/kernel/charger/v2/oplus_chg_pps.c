@@ -3351,7 +3351,8 @@ static int oplus_pps_set_fcl_curr(struct oplus_pps *chip)
 
 		fcl_limit = ROUND_DOWN(fcl_limit, 50);
 		if (fcl_limit)
-			vote(chip->pps_curr_votable, LIMIT_FCL_VOTER, true, fcl_limit, false);
+			vote(chip->pps_curr_votable, LIMIT_FCL_VOTER, true,
+				max(fcl_limit, oplus_pps_get_start_curr_min(chip)), false);
 		else
 			vote(chip->pps_curr_votable, LIMIT_FCL_VOTER, false, 0, false);
 	}

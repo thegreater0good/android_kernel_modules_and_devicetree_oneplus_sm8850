@@ -288,7 +288,7 @@ struct ui_soc_decimal {
 #define RESERVE_SOC_OFF 		0
 #define OPLUS_FULL_SOC			100
 #define SOC_JUMP_RANGE_VAL		1
-#define PARTITION_UISOC_GAP		5
+#define PARTITION_UISOC_GAP		10
 #define POWER_OFF_SOC			0
 #define HIDDEN_SOC_PERCENT_MAX		100
 #define HIDDEN_SOC_PERCENT_MIN		20
@@ -3540,6 +3540,15 @@ static void oplus_comm_smooth_strategy_update(struct oplus_chg_comm *chip)
 	oplus_comm_set_smooth_soc(chip, smooth_soc);
 }
 
+static void oplus_comm_smooth_strategy_set_init_ui_soc(struct oplus_chg_comm *chip, int ui_soc)
+{
+	if (!chip->smooth_strategy)
+		return;
+
+	oplus_chg_strategy_set_process_data(chip->smooth_strategy, "init_ui_soc", ui_soc);
+	oplus_comm_smooth_strategy_update(chip);
+}
+
 static void oplus_comm_smooth_soc_update(struct oplus_chg_comm *chip, bool init, bool check_full)
 {
 	if (chip->smooth_strategy) {
@@ -6050,6 +6059,7 @@ static void oplus_comm_subscribe_gauge_topic(struct oplus_mms *topic,
 		chip->ui_soc = shutdown_soc;
 	else
 		chip->ui_soc = chip->smooth_soc > 0 ? chip->smooth_soc : 1;
+	oplus_comm_smooth_strategy_set_init_ui_soc(chip, chip->ui_soc);
 
 	oplus_comm_update_soc_jiffies(chip);
 	chip->batt_full_jiffies = jiffies;
@@ -6326,7 +6336,7 @@ static void oplus_comm_pps_subs_callback(struct mms_subscribe *subs,
 			chip->pps_charging = !!data.intval;
 			break;
 		case PPS_ITEM_ONLINE:
-			oplus_mms_get_item_data(chip->ufcs_topic, id, &data,
+			oplus_mms_get_item_data(chip->pps_topic, id, &data,
 						false);
 			chip->pps_online = !!data.intval;
 			break;

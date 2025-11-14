@@ -761,8 +761,8 @@ static int __init oplus_freqqos_monitor_init(void)
 	if (ret)
 		return ret;
 
-	g_fqm_monitor_enable = 1;
-	fqm_dump_enable = true;
+	g_fqm_monitor_enable = 0;
+	fqm_dump_enable = false;
 	atomic_set(&g_monitors_req_cnt, 0);
 	pr_info("oplus_freqqos_monitor init\n");
 
