@@ -21,12 +21,6 @@
 
 #define GC_MARKER_PREFIX "GC Marker"
 
-struct render_related_thread {
-	pid_t pid;
-	struct task_struct *task;
-	u32 wake_count;
-};
-
 struct heavy_task {
 	struct task_struct *task;
 	u64 last_wake_time;

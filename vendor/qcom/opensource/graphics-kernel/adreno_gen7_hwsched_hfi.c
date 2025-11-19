@@ -3628,7 +3628,7 @@ static void drain_context_hw_fence_cpu(struct adreno_device *adreno_dev,
 static void drain_context_hw_fences(struct adreno_device *adreno_dev,
 	struct adreno_context *drawctxt)
 {
-	struct gen8_gmu_device *gmu = to_gen8_gmu(adreno_dev);
+	struct gen7_gmu_device *gmu = to_gen7_gmu(adreno_dev);
 
 	destroy_detached_context_inflight_hw_fences(adreno_dev, drawctxt);
 

@@ -56,8 +56,8 @@ static enum oplus_display_support_list  oplus_display_vendor =
 		OPLUS_DISPLAY_UNKNOW;
 static BLOCKING_NOTIFIER_HEAD(oplus_display_notifier_list);
 
-static struct dsi_display *primary_display;
-static struct dsi_display *secondary_display;
+static struct dsi_display *primary_display = NULL;
+static struct dsi_display *secondary_display = NULL;
 /* add for dual panel */
 static struct dsi_display *current_display = NULL;
 
@@ -276,10 +276,6 @@ int oplus_display_set_power(struct drm_connector *connector,
 
 	display->panel->oplus_panel.power_mode_early = power_mode;
 
-	if (power_mode == SDE_MODE_DPMS_OFF) {
-		atomic_set(&display->panel->oplus_panel.esd_pending, 1);
-	}
-
 	oplus_sync_power_state = power_mode;
 	switch (power_mode) {
 	case SDE_MODE_DPMS_LP1:
@@ -294,6 +290,7 @@ int oplus_display_set_power(struct drm_connector *connector,
 
 	case SDE_MODE_DPMS_ON:
 		OPLUS_DSI_INFO("SDE_MODE_DPMS_ON\n");
+		atomic_set(&display->panel->oplus_panel.esd_pending, 0);
 #ifdef OPLUS_FEATURE_DISPLAY_ONSCREENFINGERPRINT
 		if (oplus_ofp_is_supported()) {
 			oplus_ofp_power_mode_handle(display, SDE_MODE_DPMS_ON);
@@ -303,6 +300,7 @@ int oplus_display_set_power(struct drm_connector *connector,
 
 	case SDE_MODE_DPMS_OFF:
 		OPLUS_DSI_INFO("SDE_MODE_DPMS_OFF\n");
+		atomic_set(&display->panel->oplus_panel.esd_pending, 1);
 #ifdef OPLUS_FEATURE_DISPLAY_ONSCREENFINGERPRINT
 		if (oplus_ofp_is_supported()) {
 			oplus_ofp_power_mode_handle(display, SDE_MODE_DPMS_OFF);
@@ -1763,6 +1761,25 @@ void oplus_panel_timing_switch_frame_delay(struct dsi_panel *panel)
 	if (panel->oplus_panel.last_refresh_rate != 60) {
 		return;
 	}
+	per_frame_us = panel->oplus_panel.last_us_per_frame;
+	timing_switch_frame_delay = panel->oplus_panel.last_vsync_width;
+	if (timing_switch_frame_delay) {
+		oplus_panel_frame_delay(panel, per_frame_us, timing_switch_frame_delay);
+		OPLUS_DSI_INFO("timing_switch cmd will be sent in the second half of this frame\n");
+	}
+
+	return;
+}
+
+void oplus_panel_all_timing_switch_frame_delay(struct dsi_panel *panel)
+{
+	u32 per_frame_us;
+	u32 timing_switch_frame_delay;
+
+	if (!panel->oplus_panel.all_timing_switch_frame_delay) {
+		return;
+	}
+
 	per_frame_us = panel->oplus_panel.last_us_per_frame;
 	timing_switch_frame_delay = panel->oplus_panel.last_vsync_width;
 	if (timing_switch_frame_delay) {

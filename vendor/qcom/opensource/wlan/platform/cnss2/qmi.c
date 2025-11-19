@@ -43,6 +43,9 @@
 #define BDF_FILE_EU_GF		"bdwlang.b0e"
 #define BDF_FILE_US_GF		"bdwlang.b0a"
 
+//Modify for:Loading India BDF match from nv region
+#define REGION_IN_NV	0x1b
+
 #define REG_ID_CN		1
 #define REG_ID_IN		2
 #define REG_ID_EU		3
@@ -52,6 +55,7 @@
 #define REG_NAME_EU		"EU"
 #define REG_NAME_CN		"CN"
 #define REG_NAME_US		"US"
+#define REG_NAME_DEFAULT		"DEFAULT"
 #endif /* OPLUS_FEATURE_WIFI_BDF */
 
 #define QDSS_TRACE_CONFIG_FILE		"qdss_trace_config"
@@ -830,8 +834,49 @@ static bool is_prj_support_region_id(void) {
 	return false;
 }
 
+static bool is_prj_support_region_nv_id(void) {
+	int project_id = get_project();
+	cnss_pr_info("the project support region nv id is: %d\n", project_id);
+
+	if (project_id == 24776) {
+		return true;
+	}
+	return false;
+}
+
+
+static int get_regionid_from_cmdline(void)
+{
+	struct device_node *np;
+	const char *bootparams = NULL;
+	char *str;
+	int temp_region = 0;
+	int ret = 0;
+	int region_id = -1;
+
+	np = of_find_node_by_path("/chosen");
+	if (np) {
+		ret = of_property_read_string(np, "bootargs", &bootparams);
+		if (!bootparams || ret < 0) {
+			cnss_pr_err("failed to get bootargs property\n");
+			return region_id;
+		}
+
+		str = strstr(bootparams, "oplus_region=");
+		if (str) {
+			str += strlen("oplus_region=");
+			ret = get_option(&str, &temp_region);
+			if (ret == 1)
+				region_id = temp_region & 0xFF;
+			cnss_pr_info("oplus_region=0x%02x\n", region_id);
+		}
+	}
+	return region_id;
+}
+
 static void cnss_get_oplus_bdf_file_name(struct cnss_plat_data *plat_priv, char* file_name, u32 filename_len) {
 	int reg_id = get_Operator_Version();
+	int region_nv_id = 0;
 	cnss_pr_info("region id: %d, wcn chip_id: 0x%02x\n", reg_id, plat_priv->chip_info.chip_id);
 
 	if (plat_priv->chip_info.chip_id & CHIP_ID_GF_MASK) {
@@ -872,6 +917,18 @@ static void cnss_get_oplus_bdf_file_name(struct cnss_plat_data *plat_priv, char*
 				plat_priv->region_name = REG_NAME_US;
 			} else {
 				snprintf(file_name, filename_len, ELF_BDF_FILE_NAME);
+			}
+		} else if (is_prj_support_region_nv_id()) {
+			//get nvid from bsp pps modules@dinggaoshan
+			region_nv_id = get_regionid_from_cmdline();
+			if (region_nv_id == REGION_IN_NV) {
+				snprintf(file_name, filename_len, BDF_FILE_IN);
+				plat_priv->bdf_name = BDF_FILE_IN;
+				plat_priv->region_name = REG_NAME_IN;
+			} else {
+				snprintf(file_name, filename_len, ELF_BDF_FILE_NAME);
+				plat_priv->bdf_name = ELF_BDF_FILE_NAME;
+				plat_priv->region_name = REG_NAME_DEFAULT;
 			}
 		} else {
 			snprintf(file_name, filename_len, ELF_BDF_FILE_NAME);

@@ -486,13 +486,14 @@ void oplus_sensor_ov_bypass_framedrop(struct cam_sensor_ctrl_t *s_ctrl,enum cam_
 
 void oplus_sensor_sony_bypass_vsync(struct cam_sensor_ctrl_t *s_ctrl,struct i2c_settings_list *i2c_list)
 {
-	struct sensor_vsync_info vsync_info = s_ctrl->vsync_info;
-	CAM_INFO(CAM_SENSOR,"is_in_high_level is %d",s_ctrl->is_in_high_level);
-	for (int i = 0; i < i2c_list->i2c_settings.size; i++)
+	if (s_ctrl->is_in_high_level == TRUE)
 	{
-		if(i2c_list->i2c_settings.reg_setting[i].reg_addr == vsync_info.vsync_enable_reg_addr)
+		struct sensor_vsync_info vsync_info = s_ctrl->vsync_info;
+		CAM_INFO(CAM_SENSOR,"is_in_high_level is %d",s_ctrl->is_in_high_level);
+		for (int i = 0; i < i2c_list->i2c_settings.size; i++)
 		{
-			if(i2c_list->i2c_settings.reg_setting[i].reg_data == vsync_info.vsync_enable && s_ctrl->is_in_high_level == TRUE)
+			if((i2c_list->i2c_settings.reg_setting[i].reg_addr == vsync_info.vsync_enable_reg_addr) &&
+				(i2c_list->i2c_settings.reg_setting[i].reg_data == vsync_info.vsync_enable))
 			{
 				i2c_list->i2c_settings.reg_setting[i].reg_data = vsync_info.vsync_disable;
 				CAM_ERR(CAM_SENSOR,"Blocks the operation of enabling vsync during the high level period.");

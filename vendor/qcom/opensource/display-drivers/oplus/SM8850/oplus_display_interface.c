@@ -268,6 +268,7 @@ void oplus_panel_switch_pre(struct dsi_panel *panel)
 {
 	panel->oplus_panel.ts_timestamp = ktime_get();
 	oplus_panel_timing_switch_frame_delay(panel);
+	oplus_panel_all_timing_switch_frame_delay(panel);
 	oplus_panel_timing_switch_lut_set(panel);
 
 	return;

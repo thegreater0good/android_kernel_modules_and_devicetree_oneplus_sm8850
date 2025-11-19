@@ -80,6 +80,34 @@ enum SOCKET_TYPE {
 
 void notify_gpa_exit_hmbird(void);
 void notify_manager_exit(void);
+
+/* scene_stat structs & globals*/
+struct scene_stat {
+	atomic_t status[SCENE_STATUS_COUNT];
+};
+
+struct scene_stats {
+	struct scene_stat per_scene_stat[SCENE_TYPES_COUNT];
+};
+
+struct scene_stat_snap {
+	u64 status[SCENE_STATUS_COUNT];
+};
+
+struct scene_stats_snap {
+	struct scene_stat_snap per_scene_stat[SCENE_TYPES_COUNT];
+};
+
+struct manager_info {
+	char timestamp[TIMESTAMP_LEN];
+	char scene[SCENE_TYPE_MAX_LEN];
+	char action[SCENE_STATUS_MAX_LEN];
+	char package_name[ANDROID_PACKAGE_NAME_MAX_LEN];
+};
+
+#define DFL_MGR_DUMP_LEN_U64 ((sizeof(struct manager_info) * MANAGER_INFO_MAX_NUMBER + sizeof(u64) - 1) / sizeof(u64))
+#define DFL_MGR_DUMP_LEN (DFL_MGR_DUMP_LEN_U64 * sizeof(u64))
+
 int hmbird_dfx_init(void);
 void hmbird_dfx_exit(void);
 

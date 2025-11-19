@@ -696,29 +696,35 @@ static ssize_t uvlo_state_show(struct kobject *kobj,
 	struct PMICRegStruct pmic_reg_value = {0};
 	u64 pmic_history_count=0;
 	unsigned int uvlo_state=0;
+	int i = 0, len = 0;
 
         pmic_history_ptr = (struct PMICHistoryKernelStruct *)get_pmic_history();
 
         if (NULL == pmic_history_ptr) {
-		return sprintf(buf, "%x\n", uvlo_state);
+		len += snprintf(buf, 8-len, "%d\n", uvlo_state);
+		return len;
         }
 	pmic_history_count = pmic_history_ptr->log_count;
+	if(pmic_history_count > 4) {
+		len += snprintf(buf, 8-len, "%d\n", uvlo_state);
+		return len;
+	}
 	printk(KERN_INFO "pmic_history_count = %llu\n",pmic_history_count);
 
-	if (pmic_history_count-1 >= 0) {
-		pmic_first_record = pmic_history_ptr->pmic_record[pmic_history_count-1];   // last record
+	for (i = 0; i < pmic_history_count; i++) {
+		pmic_first_record = pmic_history_ptr->pmic_record[i];
 		pmic_reg_value = pmic_first_record.pmic_pon_poff_reason[0];
 		if (DATA_VALID_FLAG != pmic_reg_value.data_is_valid) {
-			return sprintf(buf, "%x\n", uvlo_state);
+			continue;
 		} else if (pmic_reg_value.oplus_uvlo_flag || pmic_reg_value.oplus_porstb_uvlo_flag) {
 			uvlo_state = 1;
-			return sprintf(buf, "%x\n", uvlo_state);
-		} else {
-			return sprintf(buf, "%x\n", uvlo_state);
+			break;
 		}
-	} else {
-		return sprintf(buf, "%x\n", uvlo_state);
 	}
+
+	len += snprintf(buf, 8-len, "%d\n", uvlo_state);
+	return len;
+
 }
 pmic_info_attr_ro(uvlo_state);
 /**********************************************/

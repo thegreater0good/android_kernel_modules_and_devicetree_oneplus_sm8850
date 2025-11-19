@@ -67,7 +67,6 @@ static int hmbird_bpf_manager_register(const struct ctl_table *table, int write,
 	int pid = -1;
 	struct task_struct *manager;
 	struct sched_param param = { .sched_priority = MAX_RT_PRIO - 1 - OPLUS_HMBIRD_BPF_MANAGER_PRIO};
-	struct cpumask mask = { .bits[0] = 0x80 };
 	static DEFINE_MUTEX(mutex);
 
 	struct ctl_table tmp = {
@@ -109,7 +108,6 @@ static int hmbird_bpf_manager_register(const struct ctl_table *table, int write,
 			oplus_hmbird_bpf_manager = NULL;
 		}
 		oplus_hmbird_bpf_manager = manager;
-		set_cpus_allowed_ptr(oplus_hmbird_bpf_manager, &mask);
 	} else {
 		char buf[32];
 		if (oplus_hmbird_bpf_manager)

@@ -501,6 +501,9 @@ static void remove_kswapd_load_stat_proc(void)
 DEFINE_STATIC_KEY_TRUE(costly_alloc_mask_reclaim);
 static bool g_mask_reclaim_enabled = true;
 static struct proc_dir_entry *mask_reclaim_entry;
+#define ALLOC_MASK_KSWAPD_RECLAIM_ORDER 3
+static int g_mask_kswapd_reclaim_status = 0; /* 0 for disabled, >0 for enabled, <0 for error*/
+static struct proc_dir_entry *mask_kswapd_reclaim_entry;
 
 static int mask_reclaim_show(struct seq_file *m, void *v)
 {
@@ -566,6 +569,67 @@ static const struct proc_ops proc_mask_reclaim_ops = {
 	.proc_release = single_release,
 };
 
+static int mask_kswapd_reclaim_show(struct seq_file *m, void *v)
+{
+	seq_printf(m, "%d\n", g_mask_kswapd_reclaim_status);
+	return 0;
+}
+
+static int mask_kswapd_reclaim_open(struct inode *inode, struct file *file)
+{
+	return single_open(file, mask_kswapd_reclaim_show, NULL);
+}
+
+static ssize_t mask_kswapd_reclaim_write(struct file *file, const char __user *buf,
+		size_t count, loff_t *ppos)
+{
+	char kbuf[KBUF_LEN] = {0};
+	char *str;
+	int val;
+
+	if (g_mask_kswapd_reclaim_status < 0) {
+		pr_warn("unabled to set mask_kswapd_reclaim");
+		return -EINVAL;
+	}
+
+	if (count > KBUF_LEN - 1) {
+		pr_warn("input too long\n");
+		return -EINVAL;
+	}
+
+	if (copy_from_user(kbuf, buf, count))
+		return -EINVAL;
+
+	kbuf[count] = 0;
+	str = strstrip(kbuf);
+	if (!str) {
+		pr_warn("input empty\n");
+		return -EINVAL;
+	}
+
+	if (!is_digit_str(str)) {
+		pr_warn("input invalid, not a digit string\n");
+		return -EINVAL;
+	}
+
+	if (kstrtoint(str, 0, &val)) {
+		pr_warn("not a valid number\n");
+		return -EINVAL;
+	}
+
+	g_mask_kswapd_reclaim_status = val;
+
+	return count;
+}
+
+static const struct proc_ops proc_mask_kswapd_reclaim_ops = {
+	.proc_open = mask_kswapd_reclaim_open,
+	.proc_read = seq_read,
+	.proc_write = mask_kswapd_reclaim_write,
+	.proc_lseek = seq_lseek,
+	.proc_release = single_release,
+};
+
 static void create_mask_reclaim_proc(void)
 {
 	mask_reclaim_entry = proc_create("oplus_mem/costly_alloc_mask_reclaim",
@@ -573,6 +637,14 @@ static void create_mask_reclaim_proc(void)
 
 	if (!mask_reclaim_entry)
 		pr_err("costly_alloc_mask_reclaim_proc create failed, ENOMEM\n");
+
+	mask_kswapd_reclaim_entry = proc_create("oplus_mem/mask_kswapd_reclaim",
+			0660, NULL, &proc_mask_kswapd_reclaim_ops);
+
+	if (!mask_kswapd_reclaim_entry) {
+		pr_err("mask_kswapd_reclaim_proc create failed, ENOMEM\n");
+		return;
+	}
 }
 
 static void remove_mask_reclaim_proc(void)
@@ -581,12 +653,20 @@ static void remove_mask_reclaim_proc(void)
 		proc_remove(mask_reclaim_entry);
 		mask_reclaim_entry = NULL;
 	}
+
+	if (mask_kswapd_reclaim_entry) {
+		proc_remove(mask_kswapd_reclaim_entry);
+		mask_kswapd_reclaim_entry = NULL;
+	}
 }
 
 static void mask_reclaim(void *data, gfp_t *alloc_gfp, unsigned int order)
 {
 	if (!static_branch_likely(&costly_alloc_mask_reclaim))
 		return;
+
+	if ((g_mask_kswapd_reclaim_status > 0) && (order == ALLOC_MASK_KSWAPD_RECLAIM_ORDER) && !(*alloc_gfp & __GFP_DMA32))
+		*alloc_gfp &= ~__GFP_KSWAPD_RECLAIM;
 
 #if defined(CONFIG_QCOM_ALLOC_MASK_RECLAIM)
 	if (likely(order <= QCOM_ALLOC_MASK_RECLAIM_ORDER))

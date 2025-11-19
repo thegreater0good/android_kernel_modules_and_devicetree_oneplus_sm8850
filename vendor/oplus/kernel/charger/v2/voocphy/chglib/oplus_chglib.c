@@ -747,6 +747,9 @@ static void oplus_chglib_subscribe_wired_topic(struct oplus_mms *topic, void *pr
 		chg_err("subscribe gauge topic error, rc=%ld\n",
 			PTR_ERR(chip->wired_subs));
 
+	oplus_mms_get_item_data(chip->wired_topic, WIRED_ITEM_PRESENT, &data, true);
+	chip->is_wired_present = !!data.intval;
+
 	oplus_mms_get_item_data(chip->wired_topic,
 				WIRED_TIME_ABNORMAL_ADAPTER, &data, true);
 	chip->is_pd_svooc_adapter = !!data.intval;

@@ -25,6 +25,9 @@
 #include "kgsl_sysfs.h"
 #include "kgsl_trace.h"
 #include "kgsl_util.h"
+#ifndef OPLUS_GPU_OLD_CHIPS
+#define OPLUS_GPU_OLD_CHIPS
+#endif
 
 #define UPDATE_BUSY_VAL		1000000
 
@@ -476,7 +479,17 @@ static ssize_t num_pwrlevels_show(struct device *dev,
 static int _get_nearest_pwrlevel(struct kgsl_pwrctrl *pwr, unsigned int clock)
 {
 	int i;
-
+	#ifdef OPLUS_GPU_OLD_CHIPS
+	if (clock > pwr->pwrlevels[0].gpu_freq){
+		if(kgsl_driver.devp[0]->dev != NULL){
+			dev_err(kgsl_driver.devp[0]->dev, "kgsl_clock %u> pwr->pwrlevels[0].gpu_freq  %u, \n",clock, pwr->pwrlevels[0].gpu_freq);
+		}
+		clock = pwr->pwrlevels[0].gpu_freq;
+	}
+	if (clock < pwr->pwrlevels[pwr->num_pwrlevels - 1].gpu_freq){
+		clock = pwr->pwrlevels[pwr->num_pwrlevels - 1].gpu_freq;
+	}
+	#endif /* OPLUS_GPU_OLD_CHIPS */
 	for (i = pwr->num_pwrlevels - 1; i >= 0; i--) {
 		if (abs(pwr->pwrlevels[i].gpu_freq - clock) < 5000000)
 			return i;
@@ -1830,7 +1843,15 @@ static int pmqos_max_notifier_call(struct notifier_block *nb, unsigned long val,
 
 	if (device->host_based_dcvs && !device->pwrscale.devfreq_enabled)
 		return NOTIFY_DONE;
-
+	#ifdef OPLUS_GPU_OLD_CHIPS
+	if (max_freq > pwr->pwrlevels[0].gpu_freq){
+		dev_err(device->dev, "kgsl_max_freq %u> pwr->pwrlevels[0].gpu_freq  %u\n",max_freq, pwr->pwrlevels[0].gpu_freq);
+		max_freq = pwr->pwrlevels[0].gpu_freq;
+	}
+	if (max_freq < pwr->pwrlevels[pwr->num_pwrlevels - 1].gpu_freq){
+		max_freq = pwr->pwrlevels[pwr->num_pwrlevels - 1].gpu_freq;
+	}
+	#endif /*OPLUS_GPU_OLD_CHIPS*/
 	for (level = pwr->num_pwrlevels - 1; level >= 0; level--) {
 		/* get nearest power level with a maximum delta of 5MHz */
 		if (abs(pwr->pwrlevels[level].gpu_freq - max_freq) < 5000000)

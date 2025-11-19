@@ -16,6 +16,8 @@
 
 extern int hmbird_common_sysctl_init(void);
 extern void hmbird_common_sysctl_deinit(void);
+extern void hmbird_minidump_init(void);
+extern void hmbird_minidump_exit(void);
 
 #ifdef CONFIG_OPLUS_SYSTEM_KERNEL_MTK
 int (*addr_get_vip_task_prio)(struct task_struct *p);
@@ -41,6 +43,7 @@ static int __init hmbird_common_init(void)
 	hmbird_II_init();
 	hmbird_CameraScene_init();
 	hmbird_dfx_init();
+	hmbird_minidump_init();
 	return 0;
 }
 
@@ -54,6 +57,7 @@ static void __exit hmbird_common_exit(void)
 	hmbird_II_exit();
 	hmbird_CameraScene_exit();
 	hmbird_dfx_exit();
+	hmbird_minidump_exit();
 }
 
 module_init(hmbird_common_init);

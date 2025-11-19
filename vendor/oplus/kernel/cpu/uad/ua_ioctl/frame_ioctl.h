@@ -132,13 +132,6 @@ struct ofb_stune_data {
 	int ed_task_boost_max_duration;
 	int ed_task_boost_max_util;
 	int ed_task_boost_timeout_duration;
-	int boost_input_stage_timeout;
-	int boost_input_stage_timeout_util;
-	int boost_anim_stage_timeout;
-	int boost_anim_stage_timeout_util;
-	int boost_traversal_stage_timeout;
-	int boost_traversal_stage_timeout_util;
-	int boost_half_vsync_timeout_util;
 	int boost_sf_freq_nongpu;
 	int boost_sf_migr_nongpu;
 	int boost_sf_freq_gpu;

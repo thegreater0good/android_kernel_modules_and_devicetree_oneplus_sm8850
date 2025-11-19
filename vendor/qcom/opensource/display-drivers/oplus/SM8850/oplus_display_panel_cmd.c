@@ -60,6 +60,7 @@ const char *cmd_set_prop_map[DSI_CMD_SET_MAX] = {
 	"qcom,mdss-dsi-sticky_on_fly-command",
 	"qcom,mdss-dsi-trigger_self_refresh-command",
 	"qcom,mdss-dsi-fps-switch-command",
+	"qcom,mdss-dsi-set-em-pulse-command",
 #ifdef OPLUS_FEATURE_DISPLAY_ADFR
 	"qcom,mdss-dsi-adfr-auto-on-command",
 	"qcom,mdss-dsi-adfr-auto-off-command",
@@ -323,6 +324,7 @@ const char *cmd_set_state_map[DSI_CMD_SET_MAX] = {
 	"qcom,mdss-dsi-sticky_on_fly-command-state",
 	"qcom,mdss-dsi-trigger_self_refresh-command-state",
 	"qcom,mdss-dsi-fps-switch-command-state",
+	"qcom,mdss-dsi-set-em-pulse-command-state",
 #ifdef OPLUS_FEATURE_DISPLAY_ADFR
 	"qcom,mdss-dsi-adfr-auto-on-command-state",
 	"qcom,mdss-dsi-adfr-auto-off-command-state",
@@ -673,6 +675,20 @@ void oplus_panel_set_on_cmd_replace_handle(struct dsi_panel *panel, enum dsi_cmd
 
 void oplus_panel_timing_switch_cmd_replace_handle(struct dsi_panel *panel, enum dsi_cmd_set_type *type)
 {
+	if(!strcmp(panel->name, "AA607 P 7 A0020 dsc cmd mode panel")) {
+		if (panel->oplus_panel.last_refresh_rate == 120 && panel->cur_mode->timing.refresh_rate == 60) {
+			if (*type == DSI_CMD_SET_TIMING_SWITCH) {
+				*type = DSI_CMD_SET_FPS_SWITCH_120_TO_60;
+				return;
+			}
+		} else if (panel->oplus_panel.last_refresh_rate == 60 && panel->cur_mode->timing.refresh_rate == 120) {
+			if (*type == DSI_CMD_SET_TIMING_SWITCH) {
+				*type = DSI_CMD_SET_FPS_SWITCH_60_TO_120;
+				return;
+			}
+		}
+	}
+
 	if (panel->oplus_panel.last_refresh_rate != 165
 			&& panel->cur_mode->timing.refresh_rate != 165) {
 		return;

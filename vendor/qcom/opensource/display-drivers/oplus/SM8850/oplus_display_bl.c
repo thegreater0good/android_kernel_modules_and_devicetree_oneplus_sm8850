@@ -984,8 +984,6 @@ int oplus_panel_post_on_backlight(void *display, struct dsi_panel *panel, u32 bl
 		}
 		OPLUS_DSI_INFO("[%s] display backlight changed: %d -> %d\n",
 			panel->oplus_panel.vendor_name, panel->bl_config.bl_level, bl_lvl);
-
-		atomic_set(&panel->oplus_panel.esd_pending, 0);
 	}
 	return 0;
 }

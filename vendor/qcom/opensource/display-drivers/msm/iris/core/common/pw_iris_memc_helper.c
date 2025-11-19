@@ -1583,7 +1583,6 @@ static void _iris_scl_reset_param(void)
 	_iris_scl_conf[SCL_DATA_PATH1].sr_out_v = pcfg->frc_setting.disp_vres;
 	_iris_scl_conf[SCL_DATA_PATH1].sr_sel_mode = PATH_SEL_META;
 
-	memset(iris_sr2d_using_level, 0, sizeof(uint32_t) * SCL_2D_PQ_CNT);
 	memset(iris_sr2d_level, 0, sizeof(uint32_t) * SCL_DATA_PATH_CNT * SCL_2D_PQ_CNT);
 	iris_expected_strategy[SCL_DATA_PATH0] = SCL_2D_ONLY;
 	iris_force_memc_strategy = false;

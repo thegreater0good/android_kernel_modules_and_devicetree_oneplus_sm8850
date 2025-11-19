@@ -235,6 +235,7 @@ def define_oplus_local_modules():
             "mm_osvelte/sys-memstat.h",
         ]),
         includes = ["."],
+        local_defines = ["CONFIG_OPLUS_FEATURE_MM_BOOSTPOOL"],
     )
 
     ddk_copy_to_dist_dir(

@@ -1549,7 +1549,6 @@ int oplus_display_panel_set_dc_compensate(void *data)
 
 int oplus_display_panel_set_mipi_err_check(void *data)
 {
-	int rc = 0;
 	u32 *check_result = data;
 	struct dsi_panel *panel = NULL;
 	struct dsi_display *display = oplus_display_get_current_display();
@@ -1574,7 +1573,7 @@ int oplus_display_panel_set_mipi_err_check(void *data)
 	OPLUS_DSI_INFO("mipi err check result: %d\n", *check_result);
 	mutex_unlock(&panel->panel_lock);
 
-	return rc;
+	return *check_result;
 }
 
 int oplus_display_panel_get_mipi_err_check(void *data)

@@ -15,6 +15,7 @@
 #include "hmbird_kfunc.h"
 #include "hmbird_common.h"
 #include "hmbird_dfx.h"
+#include "hmbird_minidump.h"
 
 extern bool test_task_ux(struct task_struct *task);
 extern unsigned int hmbird_bpf_log_level;
@@ -245,6 +246,26 @@ __bpf_kfunc void hb_bpf_notify_manager_exit(void)
 {
 	notify_manager_exit();
 }
+
+__bpf_kfunc int hb_bpf_exceps_update(int id)
+{
+	bpf_exceps_update(id, jiffies);
+	return 0;
+}
+
+__bpf_kfunc int hb_bpf_snap_misc_update(int nr_dsq, int nr_aval_clus)
+{
+	bpf_snapshot_misc_update(nr_dsq, nr_aval_clus);
+	return 0;
+}
+
+__bpf_kfunc int hb_bpf_snap_dsq_update(u64 easy_dsq_id, u64 runnable_at, u64 dsq_timeout)
+{
+	bpf_snapshot_dsq_update(easy_dsq_id, runnable_at, dsq_timeout);
+	return 0;
+}
+
+
 __bpf_kfunc_end_defs();
 
 
@@ -256,6 +277,9 @@ BTF_ID_FLAGS(func, hb_bpf_get_ux_state);
 BTF_ID_FLAGS(func, hb_bpf_is_vip_mvp);
 BTF_ID_FLAGS(func, hb_bpf_tracing_mark_write);
 BTF_ID_FLAGS(func, hb_bpf_cfg_hmbird_debug);
+BTF_ID_FLAGS(func, hb_bpf_exceps_update);
+BTF_ID_FLAGS(func, hb_bpf_snap_misc_update);
+BTF_ID_FLAGS(func, hb_bpf_snap_dsq_update);
 
 /* hmbird II bpf kfunc interface */
 BTF_ID_FLAGS(func, hb_bpf_find_user_dsq);

@@ -293,6 +293,7 @@ struct oplus_panel {
 	"0" means once aod off cmd sent the next frame will be normal frame */
 	unsigned int aod_off_frame_cost;
 	bool timing_switch_frame_delay;
+	bool all_timing_switch_frame_delay;
 
 	struct oplus_dynamic_float_te_params dfte_params;
 };

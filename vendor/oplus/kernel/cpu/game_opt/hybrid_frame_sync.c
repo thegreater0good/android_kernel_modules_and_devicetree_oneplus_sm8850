@@ -127,7 +127,7 @@ static void frame_sync_handler(struct hybrid_frame_data *data)
 		}
 #endif /* CONFIG_OPLUS_FEATURE_GEAS_FDRIVE */
 		htb_notify_frame_produce();
-		ctb_notify_frame_produce();
+		ctb_notify_frame_produce(0);
 	} break;
 
 	default:

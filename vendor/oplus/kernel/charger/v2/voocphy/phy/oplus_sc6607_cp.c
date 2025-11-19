@@ -348,6 +348,7 @@ static int sc6607_hk_get_adc(struct sc6607 *chip, enum SC6607_ADC_MODULE id)
 	u32 reg = SC6607_REG_HK_IBUS_ADC + id * SC6607_ADC_REG_STEP;
 	u8 val[2] = { 0 };
 	u64 ret;
+	int rc = 0;
 	u8 adc_open = 0;
 
 	if (!chip)
@@ -361,10 +362,10 @@ static int sc6607_hk_get_adc(struct sc6607 *chip, enum SC6607_ADC_MODULE id)
 
 	mutex_lock(&chip->adc_read_lock);
 	sc6607_field_write(chip, F_ADC_FREEZE, 1);
-	ret = sc6607_bulk_read(chip, reg, val, sizeof(val));
+	rc = sc6607_bulk_read(chip, reg, val, sizeof(val));
 	sc6607_field_write(chip, F_ADC_FREEZE, 0);
 	mutex_unlock(&chip->adc_read_lock);
-	if (ret < 0) {
+	if (rc < 0) {
 		return -EINVAL;
 	}
 	ret = val[1] + (val[0] << 8);
@@ -373,7 +374,7 @@ static int sc6607_hk_get_adc(struct sc6607 *chip, enum SC6607_ADC_MODULE id)
 	}  else {
 		ret *= sy6607_adc_step[id];
 	}
-	return ret;
+	return (int)ret;
 }
 
 static int sc6607_adc_read_ibus(struct sc6607 *chip)

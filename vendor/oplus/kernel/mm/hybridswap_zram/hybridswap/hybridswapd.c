@@ -976,7 +976,7 @@ static int zram_used_limit_mb_write(struct cgroup_subsys_state *css,
 	return 0;
 }
 
-static s64 zram_used_limit_mb_read(struct cgroup_subsys_state *css,
+static u64 zram_used_limit_mb_read(struct cgroup_subsys_state *css,
 				   struct cftype *cft)
 {
 	return (zram_used_limit_pages << PAGE_SHIFT) >> 20;
@@ -1098,7 +1098,7 @@ struct cftype mem_cgroup_swapd_legacy_files[] = {
 		.name = "zram_used_limit_mb",
 		.flags = CFTYPE_ONLY_ON_ROOT,
 		.write_s64 = zram_used_limit_mb_write,
-		.read_s64 = zram_used_limit_mb_read,
+		.read_u64 = zram_used_limit_mb_read,
 	},
 	{ }, /* terminate */
 };
@@ -1239,6 +1239,9 @@ bool free_zram_is_ok(void)
 	nr_used = zram_used_pages();
 	same_pages = zram_same_pages();
 	nr_rsv = nr_tot >> 6;
+
+	if (zram_used_limit_pages)
+		return nr_used < (nr_tot - nr_rsv);
 
 	if (nr_used - same_pages > nr_tot - nr_rsv - get_nr_zram_increase() / INC_EXTRA_ZRAM_RATIO) {
 		return false;

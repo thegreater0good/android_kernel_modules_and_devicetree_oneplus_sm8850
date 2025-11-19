@@ -105,6 +105,18 @@ def define_oplus_sched_assist_local_modules():
         config = ddk_config,
     )
 
+    if bazel_support_platform == "qcom" :
+        sched_ext_ko_deps = [
+            "//vendor/oplus/kernel/cpu:oplus_bsp_sched_assist",
+            "//vendor/oplus/kernel/cpu:oplus_bsp_waker_identify",
+            "//soc-repo:{}/drivers/soc/qcom/minidump".format(kernel_build_variant),
+        ]
+    else :
+        sched_ext_ko_deps = [
+            "//vendor/oplus/kernel/cpu:oplus_bsp_sched_assist",
+            "//vendor/oplus/kernel/cpu:oplus_bsp_waker_identify",
+            "//kernel_device_modules-6.12/drivers/misc/mediatek/aee/mrdump:mrdump",
+        ]
     define_oplus_ddk_module(
         name = "oplus_bsp_sched_ext",
         srcs = native.glob([
@@ -120,10 +132,7 @@ def define_oplus_sched_assist_local_modules():
             "mtk":  ["CONFIG_OPLUS_SYSTEM_KERNEL_MTK"],
             "qcom": ["CONFIG_OPLUS_SYSTEM_KERNEL_QCOM"],
         },
-        ko_deps = [
-            "//vendor/oplus/kernel/cpu:oplus_bsp_sched_assist",
-            "//vendor/oplus/kernel/cpu:oplus_bsp_waker_identify",
-        ],
+        ko_deps = sched_ext_ko_deps,
         header_deps = [
             "//vendor/oplus/kernel/cpu:config_headers",
         ],

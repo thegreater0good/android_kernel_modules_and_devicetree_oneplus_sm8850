@@ -68,6 +68,7 @@ static int __init game_ctrl_init(void)
 	task_util_init();
 	multi_task_util_init();
 	rt_info_init();
+	multi_rt_info_init();
 	frame_detect_init();
 	debug_init();
 	yield_opt_init();
@@ -96,6 +97,52 @@ static void __exit game_ctrl_exit(void)
 	hrtimer_boost_exit();
 	hybrid_frame_sync_exit();
 	rwsem_opt_exit();
+}
+
+struct task_struct* get_task_struct_by_pid(pid_t pid)
+{
+	struct task_struct *task = NULL;
+	rcu_read_lock();
+	task = find_task_by_vpid(pid);
+	rcu_read_unlock();
+	return task;
+}
+
+struct game_task_struct* get_game_task_struct_by_pid(pid_t pid)
+{
+	struct task_struct *task = NULL;
+	struct game_task_struct *game_task = NULL;
+	rcu_read_lock();
+	task = find_task_by_vpid(pid);
+	if (!ts_to_gts(task, &game_task)) {
+		rcu_read_unlock();
+		return NULL;
+	}
+	rcu_read_unlock();
+	return game_task;
+}
+
+struct game_task_struct* get_game_task_struct_and_task_struct_by_pid(pid_t pid)
+{
+	struct task_struct *leader = NULL;
+	struct game_task_struct *tg_g_task = NULL;
+	if (pid <= 0) {
+		return NULL;
+	}
+	rcu_read_lock();
+	leader = find_task_by_vpid(pid);
+	if (!leader || leader->pid != leader->tgid) {
+		rcu_read_unlock();
+		return NULL;
+	}
+	get_task_struct(leader);
+	if (!ts_to_gts(leader, &tg_g_task)) {
+		put_task_struct(leader);
+		rcu_read_unlock();
+		return NULL;
+	}
+	rcu_read_unlock();
+	return tg_g_task;
 }
 
 module_init(game_ctrl_init);

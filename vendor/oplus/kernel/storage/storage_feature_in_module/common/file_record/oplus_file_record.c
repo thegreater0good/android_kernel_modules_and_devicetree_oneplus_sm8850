@@ -139,6 +139,7 @@ static void init_record_process_names(void) {
 		"ros.filemanager",
 		"assistantscreen",
 		"ndroid.settings",
+		"ndroid.launcher",
 	};
 
 	for (i = 0; i < ARRAY_SIZE(process_names); i++) {

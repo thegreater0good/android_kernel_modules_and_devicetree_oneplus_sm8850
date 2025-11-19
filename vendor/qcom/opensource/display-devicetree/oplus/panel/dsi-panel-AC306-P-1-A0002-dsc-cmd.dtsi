@@ -148,7 +148,7 @@
 					39 00 00 40 00 00 03 FC 5A 5A
 					39 00 00 40 00 00 04 B0 00 24 F8
 					15 00 00 40 00 00 02 F8 05
-					39 00 00 00 00 00 03 FC A5 A5
+					39 00 00 40 00 00 03 FC A5 A5
 					39 00 00 00 00 00 03 F0 A5 A5
 					/* Dimming Setting */
 					39 00 00 40 00 00 03 F0 5A 5A
@@ -184,15 +184,11 @@
 					15 00 00 40 00 00 02 B9 11
 					15 00 00 40 00 00 02 F7 0F
 					39 00 00 00 00 00 03 F0 A5 A5
-					/* resolve display issue */
+					/*Image data settings*/
 					39 00 00 40 00 00 03 F0 5A 5A
-					39 00 00 40 00 00 03 F1 5A 5A
-					39 00 00 40 00 00 03 FC 5A 5A
-					39 00 00 40 00 00 04 B0 00 FE 97
-					15 00 00 40 00 00 02 97 DA
+					39 00 00 40 00 00 04 B0 00 03 F2
+					15 00 00 40 00 00 02 F2 82
 					15 00 00 40 00 00 02 F7 0F
-					39 00 00 40 00 00 03 FC A5 A5
-					39 00 00 40 00 00 03 F1 A5 A5
 					39 00 00 00 00 00 03 F0 A5 A5
 					/* EE esd */
 					39 00 00 40 00 00 03 F0 5A 5A
@@ -206,26 +202,6 @@
 					/* display on */
 					05 00 00 00 00 00 01 29
 				];
-
-				qcom,mdss-dsi-hbm-max-command = [
-					39 00 00 40 00 00 03 F0 5A 5A
-					39 00 00 40 00 00 03 51 0F FF
-					39 00 00 40 00 00 04 b0 00 03 66
-					39 00 00 40 00 00 02 66 01
-					39 00 00 40 00 00 04 b0 00 52 66
-					39 00 00 40 00 00 07 66 0a 85 0a 12 0b F4
-					15 00 00 40 00 00 02 F7 0F
-					39 00 00 00 00 00 03 F0 A5 A5
-				];
-
-				qcom,mdss-dsi-hbm-exit-max-command = [
-					39 00 00 40 00 00 03 F0 5A 5A
-					39 00 00 40 00 00 04 B0 00 03 66
-					39 00 00 40 00 00 02 66 00
-					39 00 00 40 00 00 03 51 0F FE
-					39 00 00 00 00 00 03 F0 A5 A5
-				];
-
 				qcom,mdss-dsi-default-switch-page-command = [
 					/*switch default page*/
 					39 00 00 00 00 00 03 F0 A5 A5
@@ -331,8 +307,6 @@
 				qcom,mdss-dsi-off-command-state = "dsi_hs_mode";
 				qcom,dsi-panel-date-switch-command-state = "dsi_hs_mode";
 				qcom,mdss-dsi-default-switch-page-command-state = "dsi_lp_mode";
-				qcom,mdss-dsi-hbm-max-command-state = "dsi_hs_mode";
-				qcom,mdss-dsi-hbm-exit-max-command-state = "dsi_hs_mode";
 
 				qcom,lm-split = <1240 1240>;
 				qcom,compression-mode = "dsc";
@@ -445,7 +419,7 @@
 					39 00 00 40 00 00 03 FC 5A 5A
 					39 00 00 40 00 00 04 B0 00 24 F8
 					15 00 00 40 00 00 02 F8 05
-					39 00 00 00 00 00 03 FC A5 A5
+					39 00 00 40 00 00 03 FC A5 A5
 					39 00 00 00 00 00 03 F0 A5 A5
 					/* Dimming Setting */
 					39 00 00 40 00 00 03 F0 5A 5A
@@ -481,15 +455,11 @@
 					15 00 00 40 00 00 02 B9 11
 					15 00 00 40 00 00 02 F7 0F
 					39 00 00 00 00 00 03 F0 A5 A5
-					/* resolve display issue */
+					/*Image data settings*/
 					39 00 00 40 00 00 03 F0 5A 5A
-					39 00 00 40 00 00 03 F1 5A 5A
-					39 00 00 40 00 00 03 FC 5A 5A
-					39 00 00 40 00 00 04 B0 00 FE 97
-					15 00 00 40 00 00 02 97 DA
+					39 00 00 40 00 00 04 B0 00 03 F2
+					15 00 00 40 00 00 02 F2 82
 					15 00 00 40 00 00 02 F7 0F
-					39 00 00 40 00 00 03 FC A5 A5
-					39 00 00 40 00 00 03 F1 A5 A5
 					39 00 00 00 00 00 03 F0 A5 A5
 					/* EE esd */
 					39 00 00 40 00 00 03 F0 5A 5A
@@ -503,26 +473,6 @@
 					/* display on */
 					05 00 00 00 00 00 01 29
 				];
-
-				qcom,mdss-dsi-hbm-max-command = [
-					39 00 00 40 00 00 03 F0 5A 5A
-					39 00 00 40 00 00 03 51 0F FF
-					39 00 00 40 00 00 04 b0 00 03 66
-					39 00 00 40 00 00 02 66 01
-					39 00 00 40 00 00 04 b0 00 52 66
-					39 00 00 40 00 00 07 66 0a 85 0a 12 0b F4
-					15 00 00 40 00 00 02 F7 0F
-					39 00 00 00 00 00 03 F0 A5 A5
-				];
-
-				qcom,mdss-dsi-hbm-exit-max-command = [
-					39 00 00 40 00 00 03 F0 5A 5A
-					39 00 00 40 00 00 04 B0 00 03 66
-					39 00 00 40 00 00 02 66 00
-					39 00 00 40 00 00 03 51 0F FE
-					39 00 00 00 00 00 03 F0 A5 A5
-				];
-
 				qcom,mdss-dsi-default-switch-page-command = [
 					/*switch default page*/
 					39 00 00 00 00 00 03 F0 A5 A5
@@ -586,7 +536,6 @@
 					39 00 00 00 00 00 03 F0 A5 A5
 
 				];
-
 				qcom,mdss-dsi-loading-effect-1-command = [
 					/* Laoding On 110% */
 					39 00 00 40 00 00 03 F0 5A 5A
@@ -629,8 +578,6 @@
 				qcom,mdss-dsi-off-command-state = "dsi_hs_mode";
 				qcom,dsi-panel-date-switch-command-state = "dsi_hs_mode";
 				qcom,mdss-dsi-default-switch-page-command-state = "dsi_lp_mode";
-				qcom,mdss-dsi-hbm-max-command-state = "dsi_hs_mode";
-				qcom,mdss-dsi-hbm-exit-max-command-state = "dsi_hs_mode";
 
 				qcom,lm-split = <1240 1240>;
 				qcom,compression-mode = "dsc";
@@ -745,7 +692,7 @@
 					39 00 00 40 00 00 03 FC 5A 5A
 					39 00 00 40 00 00 04 B0 00 24 F8
 					15 00 00 40 00 00 02 F8 05
-					39 00 00 00 00 00 03 FC A5 A5
+					39 00 00 40 00 00 03 FC A5 A5
 					39 00 00 00 00 00 03 F0 A5 A5
 					/* Dimming Setting */
 					39 00 00 40 00 00 03 F0 5A 5A
@@ -781,15 +728,11 @@
 					15 00 00 40 00 00 02 B9 11
 					15 00 00 40 00 00 02 F7 0F
 					39 00 00 00 00 00 03 F0 A5 A5
-					/* resolve display issue */
+					/*Image data settings*/
 					39 00 00 40 00 00 03 F0 5A 5A
-					39 00 00 40 00 00 03 F1 5A 5A
-					39 00 00 40 00 00 03 FC 5A 5A
-					39 00 00 40 00 00 04 B0 00 FE 97
-					15 00 00 40 00 00 02 97 DA
+					39 00 00 40 00 00 04 B0 00 03 F2
+					15 00 00 40 00 00 02 F2 82
 					15 00 00 40 00 00 02 F7 0F
-					39 00 00 40 00 00 03 FC A5 A5
-					39 00 00 40 00 00 03 F1 A5 A5
 					39 00 00 00 00 00 03 F0 A5 A5
 					/* EE esd */
 					39 00 00 40 00 00 03 F0 5A 5A
@@ -803,26 +746,6 @@
 					/* display on */
 					05 00 00 00 00 00 01 29
 				];
-
-				qcom,mdss-dsi-hbm-max-command = [
-					39 00 00 40 00 00 03 F0 5A 5A
-					39 00 00 40 00 00 03 51 0F FF
-					39 00 00 40 00 00 04 b0 00 03 66
-					39 00 00 40 00 00 02 66 01
-					39 00 00 40 00 00 04 b0 00 52 66
-					39 00 00 40 00 00 07 66 0a 85 0a 12 0b F4
-					15 00 00 40 00 00 02 F7 0F
-					39 00 00 00 00 00 03 F0 A5 A5
-				];
-
-				qcom,mdss-dsi-hbm-exit-max-command = [
-					39 00 00 40 00 00 03 F0 5A 5A
-					39 00 00 40 00 00 04 B0 00 03 66
-					39 00 00 40 00 00 02 66 00
-					39 00 00 40 00 00 03 51 0F FE
-					39 00 00 00 00 00 03 F0 A5 A5
-				];
-
 				qcom,mdss-dsi-default-switch-page-command = [
 					/*switch default page*/
 					39 00 00 00 00 00 03 F0 A5 A5
@@ -887,7 +810,6 @@
 					39 00 00 00 00 00 03 F0 A5 A5
 
 				];
-
 				qcom,mdss-dsi-loading-effect-1-command = [
 					/* Laoding On 110% */
 					39 00 00 40 00 00 03 F0 5A 5A
@@ -930,8 +852,6 @@
 				qcom,mdss-dsi-off-command-state = "dsi_hs_mode";
 				qcom,dsi-panel-date-switch-command-state = "dsi_hs_mode";
 				qcom,mdss-dsi-default-switch-page-command-state = "dsi_lp_mode";
-				qcom,mdss-dsi-hbm-max-command-state = "dsi_hs_mode";
-				qcom,mdss-dsi-hbm-exit-max-command-state = "dsi_hs_mode";
 
 				qcom,lm-split = <1240 1240>;
 				qcom,compression-mode = "dsc";
@@ -986,7 +906,7 @@
 
 	/* ofp config */
 	oplus,ofp-fp-type = <0x82>;
-	oplus,ofp-longrui-aod-config = <0x06>;
+	oplus,ofp-longrui-aod-config = <0x0E>;
 	oplus,ofp-need-to-wait-data-before-aod-on;
 
 	qcom,mdss-dsi-display-timings {
@@ -1382,12 +1302,12 @@
 	qcom,mdss-dsi-panel-status-check-mode = "reg_read";
 	qcom,mdss-dsi-panel-status-command = [
 		06 00 00 00 00 00 01 0A
-		06 00 00 00 00 00 01 E9
+		06 00 00 00 00 00 01 0E
 		06 00 00 00 00 00 01 EE
 	];
 	qcom,mdss-dsi-panel-status-command-state = "dsi_lp_mode";
 	qcom,mdss-dsi-panel-status-value = <
-		0x9F 0x00 0x00 0x00
+		0x9F 0x80 0x00 0x00
 	>;
 	qcom,mdss-dsi-panel-status-read-length = <1 1 2>;
 	oplus,mdss-dsi-panel-status-match-modes = <0x00000000>;

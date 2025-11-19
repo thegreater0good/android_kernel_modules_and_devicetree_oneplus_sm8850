@@ -850,10 +850,10 @@ static struct wls_adapter_curve_table adapter_curves_table[] = {
 	{0x24, {{25, 30, 64, 290}, {20, 25, 64, -1}}}, {0x25, {{25, 30, 64, 290}, {20, 25, 64, -1}}},
 	{0x26, {{25, 30, 64, 290}, {20, 25, 64, -1}}}, {0x27, {{25, 30, 64, 290}, {20, 25, 64, -1}}},
 	/* 65W */
-	{0x14, {{35, 35, 64, 290}, {25, 30, 64, 600}, {25, 25, 64, -1}}}, {0x28, {{35, 35, 64, 290}, {25, 30, 64, 600}, {25, 25, 64, -1}}},
-	{0x2A, {{35, 35, 64, 290}, {25, 30, 64, 600}, {25, 25, 64, -1}}}, {0x35, {{35, 35, 64, 290}, {25, 30, 64, 600}, {25, 25, 64, -1}}},
-	{0x63, {{35, 35, 64, 290}, {25, 30, 64, 600}, {25, 25, 64, -1}}}, {0x66, {{35, 35, 64, 290}, {25, 30, 64, 600}, {25, 25, 64, -1}}},
-	{0x6E, {{35, 35, 64, 290}, {25, 30, 64, 600}, {25, 25, 64, -1}}}, {0x04, {{35, 35, 64, 290}, {25, 30, 64, 600}, {25, 25, 64, -1}}},
+	{0x14, {{35, 35, 64, 290}, {25, 30, 64, 600}, {20, 25, 64, -1}}}, {0x28, {{35, 35, 64, 290}, {25, 30, 64, 600}, {20, 25, 64, -1}}},
+	{0x2A, {{35, 35, 64, 290}, {25, 30, 64, 600}, {20, 25, 64, -1}}}, {0x35, {{35, 35, 64, 290}, {25, 30, 64, 600}, {20, 25, 64, -1}}},
+	{0x63, {{35, 35, 64, 290}, {25, 30, 64, 600}, {20, 25, 64, -1}}}, {0x66, {{35, 35, 64, 290}, {25, 30, 64, 600}, {20, 25, 64, -1}}},
+	{0x6E, {{35, 35, 64, 290}, {25, 30, 64, 600}, {20, 25, 64, -1}}}, {0x04, {{35, 35, 64, 290}, {25, 30, 64, 600}, {20, 25, 64, -1}}},
 
 	/* 66W */
 	{0x2B, {{35, 35, 64, 170}, {25, 30, 64, 180}, {25, 25, 64, -1}}}, {0x36, {{35, 35, 64, 170}, {25, 30, 64, 180}, {25, 25, 64, -1}}},
@@ -6669,6 +6669,7 @@ static int oplus_chg_wls_fastchg_restart_check(struct oplus_chg_wls *wls_dev)
 	int ibat_ma = 0;
 	int vbat_mv = 0;
 	int rc;
+	static int cnt = 0;
 
 	if (wls_status->switch_quiet_mode || !wls_dev->batt_charge_enable)
 		return -EPERM;
@@ -6694,7 +6695,16 @@ static int oplus_chg_wls_fastchg_restart_check(struct oplus_chg_wls *wls_dev)
 	rc = oplus_chg_wls_get_vbat(wls_dev, &vbat_mv);
 	if ((rc < 0) || vbat_mv >= dynamic_cfg->fastch_max_vbat_mv[temp_region]) {
 		chg_err("can't get vbat, or vbat is too high rc=%d\n", rc);
+		cnt = 0;
 		return -EPERM;
+	} else if (vbat_mv < dynamic_cfg->fastch_max_vbat_mv[temp_region] && cnt < 1) {
+		cnt++;
+		chg_err("vbat is lower than fastch_max_vbat_mv, vbat_mv=%d, cnt=%d,"
+			"fastch_max_vbat_mv=%d\n", vbat_mv, cnt,
+			dynamic_cfg->fastch_max_vbat_mv[temp_region]);
+		return -EPERM;
+	} else {
+		cnt = 0;
 	}
 
 	rc = oplus_chg_wls_get_ibat(wls_dev, &ibat_ma);
@@ -13319,6 +13329,13 @@ static int oplus_chg_wls_epp_force_to_bpp_loop_check(struct oplus_chg_wls *wls_d
 	int rc = 0;
 	enum oplus_chg_wls_rx_mode rx_mode;
 
+#ifndef CONFIG_DISABLE_OPLUS_FUNCTION
+	if (get_eng_version() == HIGH_TEMP_AGING || get_eng_version() == FACTORY) {
+		chg_err("factory/high temp version, skip epp force bpp\n");
+		return rc;
+	}
+#endif
+
 	oplus_chg_wls_rx_get_rx_mode(wls_dev->wls_rx->rx_ic, &rx_mode);
 	if (rc < 0) {
 		chg_err("get rx mode error, rc=%d\n", rc);
@@ -13365,8 +13382,8 @@ static void oplus_chg_wls_epp_force_to_bpp_check_handler(struct oplus_chg_wls *w
 		return;
 
 #ifndef CONFIG_DISABLE_OPLUS_FUNCTION
-	if (get_eng_version() != OEM_RELEASE) {
-		chg_err("get_eng_version is not OEM_RELEASE\n");
+	if (get_eng_version() == HIGH_TEMP_AGING || get_eng_version() == FACTORY) {
+		chg_err("factory/high temp version, skip epp force bpp\n");
 		return;
 	}
 #endif

@@ -587,6 +587,7 @@ static const struct proc_ops osml_report_proc_ops = {
 	.proc_release = single_release,
 };
 
+static DEFINE_MUTEX(enable_mutex_lock);
 static ssize_t osml_reset_proc_write(struct file *file, const char __user *buf, size_t count, loff_t *ppos)
 {
 	int val;
@@ -601,8 +602,10 @@ static ssize_t osml_reset_proc_write(struct file *file, const char __user *buf, 
 	if (val != 1)
 		return -EINVAL;
 
+	mutex_lock(&enable_mutex_lock);
 	if (pmonitor.buf)
 		memset(pmonitor.buf, 0, sizeof(long long) * pmonitor.event_size * MAX_REPORT_SIZE);
+	mutex_unlock(&enable_mutex_lock);
 
 	record_cnt = 0;
 	atomic_set(&frame_number, -1);
@@ -888,7 +891,6 @@ static void release_event(int list_type)
 	pr_info("release_event sample event released.");
 }
 
-static DEFINE_MUTEX(enable_mutex_lock);
 static ssize_t osml_enable_proc_write(struct file *file, const char __user *buf, size_t count, loff_t *ppos)
 {
 	unsigned int val, i;

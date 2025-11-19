@@ -2734,7 +2734,8 @@ static bool oplus_voocphy_check_slave_cp_status(struct oplus_voocphy_manager *ch
 			oplus_voocphy_slave_get_chg_enable(chip, &slave_cp_status);
 			if (oplus_voocphy_get_slave_ichg(chip) < g_voocphy_chip->slave_cp_enable_thr_low ||
 			    chip->slave_ops->get_cp_status(chip) == 0 ||
-			    oplus_voocphy_get_ichg_devation(chip) > chip->cp_ibus_devation) {
+			    (chip->adapter_type == ADAPTER_SVOOC &&
+			    oplus_voocphy_get_ichg_devation(chip) > chip->cp_ibus_devation)) {
 				voocphy_err("slave cp ichg=%d mA, status:%d, devation:%d, cp_ibus_devation:%d count:%d!\n",
 					    oplus_voocphy_get_slave_ichg(chip),
 					    chip->slave_ops->get_cp_status(chip),

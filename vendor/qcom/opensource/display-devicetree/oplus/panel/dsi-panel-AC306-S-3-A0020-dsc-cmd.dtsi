@@ -117,6 +117,9 @@
 					15 00 00 40 00 00 02 61 03 //AOD in = 30Hz
 					15 00 00 40 00 00 02 35 00 //TE On
 					15 00 00 00 00 00 02 53 20 //BC On, Dimming Off
+					/* DIC RCN off */
+					39 00 00 40 00 00 04 FF 5A A5 17
+					15 00 00 00 00 00 02 A0 00
 
 					39 00 00 40 00 00 04 FF 5A A5 00 //Page 0
 					15 00 00 40 00 00 02 60 00 //120hz 1 pulse
@@ -175,7 +178,7 @@
 					39 00 00 40 00 00 04 FF 5A A5 4F // PAGE 4F
 					15 00 00 40 00 00 02 8B 78 // cmd core 0 queue all done
 					39 00 00 40 00 00 04 FF 5A A5 00
-					39 00 00 00 00 00 05 51 00 00 03 D4
+					39 00 00 00 00 00 05 51 00 00 03 E0
 				];
 				qcom,mdss-dsi-nolp-command = [
 					/* AOD Mode OFF */
@@ -185,12 +188,12 @@
 				qcom,mdss-dsi-aod-high-mode-command = [
 					/* AOD 50nit */
 					39 00 00 40 00 00 04 FF 5A A5 00
-					39 00 00 00 00 00 05 51 00 00 03 D4
+					39 00 00 00 00 00 05 51 00 00 03 E0
 				];
 				qcom,mdss-dsi-aod-low-mode-command = [
 					/* AOD 10nit */
 					39 00 00 40 00 00 04 FF 5A A5 00
-					39 00 00 00 00 00 05 51 00 00 01 B2
+					39 00 00 00 00 00 05 51 00 00 01 CA
 				];
 				qcom,mdss-dsi-ultra-low-power-aod-on-command = [
 					39 00 00 40 00 00 04 FF 5A A5 2D
@@ -273,6 +276,9 @@
 					15 00 00 40 00 00 02 61 03 //AOD in = 30Hz
 					15 00 00 40 00 00 02 35 00 //TE On
 					15 00 00 00 00 00 02 53 20 //BC On, Dimming Off
+					/* DIC RCN off */
+					39 00 00 40 00 00 04 FF 5A A5 17
+					15 00 00 00 00 00 02 A0 00
 
 					39 00 00 40 00 00 04 FF 5A A5 00 //Page 0
 					15 00 00 40 00 00 02 60 01 //90hz 1Pulse
@@ -431,6 +437,9 @@
 					15 00 00 40 00 00 02 61 03 //AOD in = 30Hz
 					15 00 00 40 00 00 02 35 00 //TE On
 					15 00 00 00 00 00 02 53 20 //BC On, Dimming Off
+					/* DIC RCN off */
+					39 00 00 40 00 00 04 FF 5A A5 17
+					15 00 00 00 00 00 02 A0 00
 
 					39 00 00 40 00 00 04 FF 5A A5 00 //Page 0
 					15 00 00 40 00 00 02 60 00 //120hz 1Pulse
@@ -564,7 +573,7 @@
 
 	/* ofp config */
 	oplus,ofp-fp-type = <0x82>;
-	oplus,ofp-longrui-aod-config = <0x06>;
+	oplus,ofp-longrui-aod-config = <0x0E>;
 	oplus,ofp-need-to-wait-data-before-aod-on;
 
 	qcom,mdss-dsi-display-timings {
@@ -861,7 +870,7 @@
 		0E
 	];
 	oplus,mipi-err-check-value = [
-		00
+		80
 	];
 	oplus,mipi-err-check-count = [
 		01

@@ -39,6 +39,7 @@ extern int g_debug_enable;
 extern inline void systrace_c_printk(const char *msg, unsigned long val);
 extern inline void systrace_c_signed_printk(const char *msg, long val);
 extern inline void htb_systrace_c_printk(const char *prefix, int digit, const char *comm, int val);
+extern inline void systrace_c_printk_common(const char *msg, unsigned long val, int id);
 
 int cpu_load_init(void);
 void frame_load_init(void);
@@ -46,6 +47,7 @@ int cpufreq_limits_init(void);
 int task_util_init(void);
 int multi_task_util_init(void);
 int rt_info_init(void);
+int multi_rt_info_init(void);
 int early_detect_init(void);
 int debug_init(void);
 
@@ -55,6 +57,8 @@ bool task_is_fair(struct task_struct *task);
 void add_tasks_to_frame_group(pid_t *tracked_pids, int tracked_pid_num);
 void cl_notify_frame_produce(void);
 void fl_notify_frame_produce(void);
+
+void ttwu_multi_rt_info_hook(struct task_struct *task);
 
 /*----------------------------- rt info start -----------------------------*/
 
@@ -102,7 +106,7 @@ void ch_freq_boost_request(cpumask_var_t control_cpumask, enum CH_BOOST_ACTION a
 
 /*----------------------------- ch boost req end -----------------------------*/
 
-/*----------------------------- task util start -----------------------------*/
+/*----------------------------- multi task util start -----------------------------*/
 
 #define MULTI_TASK_INFO_SIZE (1 << 5)
 struct multi_task_ctrl_info
@@ -124,5 +128,34 @@ enum multi_task_ctrl_cmd_id {
 	_IOWR(MULTI_TASK_INFO_MAGIC, MULTI_TASK_TGID, struct multi_task_ctrl_info)
 
 /*----------------------------- multi task util end -----------------------------*/
+
+/*----------------------------- multi rt info start -----------------------------*/
+
+extern atomic_t enable_multi_task_util;
+
+#define MULTI_RT_INFO_PID_SIZE (1 << 5)
+
+struct multi_rt_ctrl_info
+{
+	s64 data[MULTI_RT_INFO_PID_SIZE];
+	size_t size;
+};
+
+enum multi_rt_ctrl_cmd_id {
+	MULTI_RT_PIDS,
+	MULTI_RT_MAX_ID,
+};
+
+#define MULTI_RT_INFO_MAGIC 0xE2
+#define CMD_ID_MULTI_RT_PIDS \
+	_IOWR(MULTI_RT_INFO_MAGIC, MULTI_RT_PIDS, struct multi_rt_ctrl_info)
+
+/*----------------------------- multi rt info end -----------------------------*/
+
+/*----------------------------- game task tool start ----------------------------*/
+struct task_struct* get_task_struct_by_pid(pid_t pid);
+struct game_task_struct* get_game_task_struct_by_pid(pid_t pid);
+struct game_task_struct* get_game_task_struct_and_task_struct_by_pid(pid_t pid);
+/*----------------------------- game task tool end ----------------------------*/
 
 #endif /*__GAME_CTRL_H__*/

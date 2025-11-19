@@ -37,6 +37,9 @@ static int gpu_usage = -1;
 static int other_usage = -1;
 static int cdwb_disable; /* cdwb switch, default:0 (enable), disable:1 */
 
+#define PROC_OPLUS_CL "oplus_cl"
+struct proc_dir_entry *oplus_cl_dir;
+
 static ssize_t dbg_proc_write(struct file *file, const char __user *buf, size_t count, loff_t *ppos)
 {
 	char page[32] = {0};
@@ -685,6 +688,96 @@ static const struct proc_ops dis_cdwb_proc_ops = {
 	.proc_lseek		= default_llseek,
 };
 
+static int multi_enq_debug;
+module_param(multi_enq_debug, int, 0644);
+
+static int cl_split_usage;
+static int cl_float_usage;
+
+enum CL_MULTI_ENQ {
+	CL_SPLIT_START = 1,
+	CL_SPLIT_END,
+	CL_FLOAT_START,
+	CL_FLOAT_END
+};
+
+static ssize_t proc_cl_multi_enq_write(struct file *file, const char __user *buf,
+					size_t count, loff_t *ppos)
+{
+	char buffer[64] = {0};
+	int err;
+	int input_val;
+
+	memset(buffer, 0, sizeof(buffer));
+
+	if (count > sizeof(buffer) - 1)
+		count = sizeof(buffer) - 1;
+
+	if (copy_from_user(buffer, buf, count))
+		return -EFAULT;
+
+	err = kstrtoint(strstrip(buffer), 10, &input_val);
+	if (err)
+		return err;
+
+	if (multi_enq_debug)
+		pr_err("%s: task %s %d, Input val %d\n", __func__, current->comm, current->pid, input_val);
+
+	switch (input_val) {
+	case CL_SPLIT_START:
+		cl_split_usage = 1;
+		break;
+	case CL_SPLIT_END:
+		cl_split_usage = 0;
+		break;
+	case CL_FLOAT_START:
+		cl_float_usage = 1;
+		break;
+	case CL_FLOAT_END:
+		cl_float_usage = 0;
+		break;
+	default:
+		pr_err("%s: task %s %d, Unknown Input Value : %d\n",
+			__func__, current->comm, current->pid, input_val);
+		break;
+	}
+	return count;
+}
+
+static ssize_t proc_cl_multi_enq_read(struct file *file, char __user *buf,
+					size_t count, loff_t *ppos)
+{
+	char buffer[64] = {0};
+	size_t len = 0;
+
+	len = snprintf(buffer, sizeof(buffer), "%d, %d\n", cl_split_usage, cl_float_usage);
+
+	return simple_read_from_buffer(buf, count, ppos, buffer, len);
+}
+
+static const struct proc_ops proc_cl_multi_enq_fops = {
+        .proc_write = proc_cl_multi_enq_write,
+        .proc_read = proc_cl_multi_enq_read,
+        .proc_lseek = default_llseek,
+};
+
+static void multi_enq_detect_init(void)
+{
+	oplus_cl_dir = proc_mkdir(PROC_OPLUS_CL, NULL);
+	if (!oplus_cl_dir) {
+		pr_warn("%s: can't create %s under /proc\n", __func__, PROC_OPLUS_CL);
+		return;
+	}
+
+	proc_create("cl_multi_enq", 0664, oplus_cl_dir, &proc_cl_multi_enq_fops);
+}
+
+bool slc_multi_enq_detect(void)
+{
+	return cl_float_usage || cl_split_usage;
+}
+EXPORT_SYMBOL_GPL(slc_multi_enq_detect);
+
 static void create_slc_proc(void)
 {
 	if (!oplus_slc_dir)
@@ -765,6 +858,9 @@ static int __init oplus_slc_init(void)
 
 	pr_fmt("oplus_slc init\n");
 
+	/* hook for multi enq detect */
+	multi_enq_detect_init();
+
 	return 0;
 }
 
@@ -784,6 +880,11 @@ static void __exit oplus_slc_exit(void)
 		remove_proc_entry("hint", oplus_slc_dir);
 		remove_proc_entry("oplus_slc", NULL);
 		oplus_slc_dir = NULL;
+	}
+	if (oplus_cl_dir) {
+		remove_proc_entry("cl_multi_enq", oplus_cl_dir);
+		remove_proc_entry(PROC_OPLUS_CL, NULL);
+		oplus_cl_dir = NULL;
 	}
 	oplus_slc_indicator_exit();
 	osml_exit();

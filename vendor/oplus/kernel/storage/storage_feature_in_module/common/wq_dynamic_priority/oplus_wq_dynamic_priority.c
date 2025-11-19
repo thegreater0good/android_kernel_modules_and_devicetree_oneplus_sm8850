@@ -11,7 +11,6 @@
 #include <trace/hooks/blk.h>
 #include "oplus_wq_dynamic_priority.h"
 
-#define WQ_UX    (1 << 14)
 #define VIRTUAL_KWORKER_NORMAL_NICE (-1000)
 #define VIRTUAL_KWORKER_KBLOCKD_NICE (-1001)
 #define WQ_CMP(str)  (strncmp(wq->name, str, sizeof(str) - 1) == 0)
@@ -38,9 +37,9 @@ static void android_rvh_alloc_and_link_pwqs_handler(void *unused,
 }
 
 static struct config_wq_flags oplus_wq_config[] = {
-    { "loop", WQ_UNBOUND | WQ_FREEZABLE | WQ_HIGHPRI | WQ_UX },
-    { "kverityd", WQ_MEM_RECLAIM | WQ_HIGHPRI | WQ_UX | WQ_UNBOUND },
-    { "opluskblockd", WQ_MEM_RECLAIM | WQ_HIGHPRI | WQ_UX | WQ_UNBOUND },
+    { "loop", WQ_UNBOUND | WQ_FREEZABLE | WQ_HIGHPRI },
+    { "kverityd", WQ_MEM_RECLAIM | WQ_HIGHPRI | WQ_UNBOUND },
+    { "opluskblockd", WQ_MEM_RECLAIM | WQ_HIGHPRI | WQ_UNBOUND },
     // Add more strings and flags as needed.
     { NULL, 0 } // Terminate array with NULL
 };
@@ -53,7 +52,7 @@ static int handler_alloc_workqueue_pre(struct kprobe *p, struct pt_regs *regs)
     struct config_wq_flags *item = oplus_wq_config;
     if(fmt) {
         while (item->target_str) {
-            if (!strncmp(fmt, item->target_str, strlen(item->target_str)) && (item->new_flags != flags)) {
+            if ((strlen(fmt) >= strlen(item->target_str)) && !strncmp(fmt, item->target_str, strlen(item->target_str)) && (item->new_flags != flags)) {
                 printk(KERN_INFO "alloc_workqueue: matching fmt '%s', modifying flags from 0x%x to 0x%x\n", fmt, flags, item->new_flags);
                 regs->regs[1] = item->new_flags;
                 break;

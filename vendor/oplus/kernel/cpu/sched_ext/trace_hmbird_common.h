@@ -32,6 +32,22 @@ DEFINE_EVENT(hmbird_common_val, hmbird_bpf_log_level_update,
 	TP_PROTO(unsigned int hmbird_bpf_log_level),
 	TP_ARGS(hmbird_bpf_log_level));
 
+TRACE_EVENT(hmbird_minidump_snapshot,
+
+	TP_PROTO(int is_trigger),
+
+	TP_ARGS(is_trigger),
+
+	TP_STRUCT__entry(
+		__field(int, is_trigger)),
+
+	TP_fast_assign(
+		__entry->is_trigger = is_trigger;),
+
+	TP_printk("minidump_snapshot:is_trigger=%d",
+		__entry->is_trigger)
+);
+
 #endif /*_TRACE_HMBIRD_COMMON_H */
 
 #undef TRACE_INCLUDE_PATH

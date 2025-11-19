@@ -19,24 +19,24 @@
 #include "frame_detect/frame_detect.h"
 #include "critical_task_boost.h"
 
-/*
- * render related thread wake information
- */
-struct render_related_thread {
-	pid_t pid;
-	struct task_struct *task;
-	u32 wake_count;
-} related_threads[MAX_TID_COUNT];
+static struct render_related_thread related_threads[MAX_TID_COUNT];
 
 pid_t related_threads_sorted[MAX_TID_COUNT];
 
+#define MAX_SF_APP_WAKEE_RESULT_NUM 30
+static struct render_related_thread sf_app_wakee_results[MAX_SF_APP_WAKEE_RESULT_NUM];
+static struct render_related_thread sf_app_wakee_threads[MAX_SF_APP_WAKEE_RESULT_NUM];
+static char sf_app_wakee_page[512] = {0};
+atomic_t need_cnt_sf_app_wakee = ATOMIC_INIT(0);
+
 static int rt_num = 0;
 static int total_num = 0;
+static int sf_app_wakee_num = 0;
 static int rt_num_sorted = 0;
 static int total_num_sorted = 0;
 static pid_t game_tgid = -1;
 
-static DEFINE_RWLOCK(rt_info_rwlock);
+static DEFINE_RAW_SPINLOCK(rt_info_lock);
 static DEFINE_RWLOCK(rt_info_sorted_rwlock);
 atomic_t have_valid_render_pid = ATOMIC_INIT(0);
 
@@ -50,7 +50,7 @@ static inline bool same_rt_thread_group(struct task_struct *waker,
  * surfaceflinger app thread start game logic every frame
  */
 static inline bool sf_app_wakeup_game_thread(struct task_struct *waker,
-        struct task_struct *wakee)
+		struct task_struct *wakee)
 {
 	struct game_task_struct *waker_gts = NULL;
 
@@ -85,6 +85,18 @@ static struct render_related_thread *find_related_thread(struct task_struct *tas
 	for (i = 0; i < total_num; i++) {
 		if ((related_threads[i].task == task) && (related_threads[i].pid == task->pid))
 			return &related_threads[i];
+	}
+
+	return NULL;
+}
+
+static struct render_related_thread *find_sf_app_wakee_thread(struct task_struct *task)
+{
+	int i;
+	for (i = 0; i < sf_app_wakee_num; i++) {
+		if ((sf_app_wakee_threads[i].task == task) && (sf_app_wakee_threads[i].pid == task->pid)) {
+			return &sf_app_wakee_threads[i];
+		}
 	}
 
 	return NULL;
@@ -130,8 +142,11 @@ static void try_to_wake_up_success_hook(void *unused, struct task_struct *task)
 {
 	struct render_related_thread *wakee;
 	struct render_related_thread *waker;
+	struct render_related_thread *sf_app_wakee;
+	unsigned long flags;
 
 	ui_assist_threads_wake_stat(task);
+	ttwu_multi_rt_info_hook(task);
 
 	if (atomic_read(&have_valid_render_pid) == 0)
 		return;
@@ -150,7 +165,7 @@ static void try_to_wake_up_success_hook(void *unused, struct task_struct *task)
 	 * only update wake stat when lock is available,
 	 * if not available, skip.
 	 */
-	if (write_trylock(&rt_info_rwlock)) {
+	if (raw_spin_trylock_irqsave(&rt_info_lock, flags)) {
 		if (sf_app_wakeup_game_thread(current, task)) {
 			wakee = find_related_thread(task);
 			if (!wakee) {
@@ -165,6 +180,20 @@ static void try_to_wake_up_success_hook(void *unused, struct task_struct *task)
 				wakee->wake_count++;
 			}
 
+			if ((task->pid != task->tgid) && ((strnstr(task->comm, "Thread-", 7) != NULL))) {
+				sf_app_wakee = find_sf_app_wakee_thread(task);
+				if (!sf_app_wakee) {
+					if (sf_app_wakee_num >= MAX_SF_APP_WAKEE_RESULT_NUM)
+						goto unlock;
+					sf_app_wakee = &sf_app_wakee_threads[sf_app_wakee_num];
+					sf_app_wakee->pid = task->pid;
+					sf_app_wakee->task = task;
+					sf_app_wakee->wake_count = 1;
+					sf_app_wakee_num++;
+				} else {
+					sf_app_wakee->wake_count++;
+				}
+			}
 			goto unlock;
 		}
 
@@ -206,7 +235,7 @@ static void try_to_wake_up_success_hook(void *unused, struct task_struct *task)
 		}
 
 unlock:
-		write_unlock(&rt_info_rwlock);
+		raw_spin_unlock_irqrestore(&rt_info_lock, flags);
 	}
 	heavy_task_boost(task, related_threads, total_num);
 }
@@ -250,6 +279,7 @@ static int rt_info_show(struct seq_file *m, void *v)
 	int tracked_pid_num = 0;
 	ssize_t len = 0;
 	pid_t logic_thread;
+	unsigned long flags;
 
 	if (atomic_read(&have_valid_render_pid) == 0)
 		return -ESRCH;
@@ -263,7 +293,7 @@ static int rt_info_show(struct seq_file *m, void *v)
 		return -ENOMEM;
 	}
 
-	read_lock(&rt_info_rwlock);
+	raw_spin_lock_irqsave(&rt_info_lock, flags);
 	for (i = 0; i < total_num; i++) {
 		results[i].pid = related_threads[i].pid;
 		results[i].task = related_threads[i].task;
@@ -277,7 +307,7 @@ static int rt_info_show(struct seq_file *m, void *v)
 	gl_num = rt_num;
 	rt_num_sorted = rt_num;
 	total_num = rt_num;
-	read_unlock(&rt_info_rwlock);
+	raw_spin_unlock_irqrestore(&rt_info_lock, flags);
 
 	if (unlikely(gl_num > 1)) {
 		sort(&results[0], gl_num,
@@ -320,9 +350,86 @@ static int rt_info_show(struct seq_file *m, void *v)
 	return 0;
 }
 
+static int sf_app_wakee_thread_show(struct seq_file *m, void *v)
+{
+	int i, num, result_num = 0;
+	char task_name[TASK_COMM_LEN];
+	ssize_t len = 0;
+	unsigned long flags;
+
+	if ((atomic_read(&have_valid_game_pid) == 0) || atomic_read(&need_cnt_sf_app_wakee) == 0)
+		return -ESRCH;
+
+	raw_spin_lock_irqsave(&rt_info_lock, flags);
+	for (i = 0; i < sf_app_wakee_num; i++) {
+		if (sf_app_wakee_threads[i].wake_count > 0) {
+			sf_app_wakee_results[result_num].pid = sf_app_wakee_threads[i].pid;
+			sf_app_wakee_results[result_num].task = sf_app_wakee_threads[i].task;
+			sf_app_wakee_results[result_num].wake_count = sf_app_wakee_threads[i].wake_count;
+			result_num++;
+		}
+	}
+	sf_app_wakee_num = 0;
+	raw_spin_unlock_irqrestore(&rt_info_lock, flags);
+
+	if (result_num > 1) {
+		sort(&sf_app_wakee_results[0], result_num,
+			sizeof(struct render_related_thread), &cmp_task_wake_count, NULL);
+	}
+
+	memset(sf_app_wakee_page, 0, sizeof(sf_app_wakee_page));
+
+	num = 0;
+	for (i = 0; i < result_num; i++) {
+		if (get_task_name(sf_app_wakee_results[i].pid, sf_app_wakee_results[i].task, task_name)) {
+			len += snprintf(sf_app_wakee_page + len, sizeof(sf_app_wakee_page) - len, "%d;%s;%u\n",
+				sf_app_wakee_results[i].pid, task_name, sf_app_wakee_results[i].wake_count);
+
+			if (++num >= MAX_SF_APP_WAKEE_RESULT_NUM)
+				break;
+		}
+	}
+
+	if (len > 0)
+		seq_puts(m, sf_app_wakee_page);
+
+	return 0;
+}
+
 static int rt_info_proc_open(struct inode *inode, struct file *filp)
 {
 	return single_open(filp, rt_info_show, inode);
+}
+
+static int sf_app_wakee_thread_proc_open(struct inode *inode, struct file *filp)
+{
+	return single_open(filp, sf_app_wakee_thread_show, inode);
+}
+
+static ssize_t sf_app_wakee_thread_proc_write(struct file *file, const char __user *buf, size_t count, loff_t *ppos)
+{
+	char buffer[32];
+	int err, val;
+
+	memset(buffer, 0, sizeof(buffer));
+
+	if (count > sizeof(buffer) - 1)
+		count = sizeof(buffer) - 1;
+
+	if (copy_from_user(buffer, buf, count))
+		return -EFAULT;
+
+	buffer[count] = '\0';
+	err = kstrtoint(strstrip(buffer), 10, &val);
+	if (err)
+		return err;
+
+	if (val == 1)
+		atomic_set(&need_cnt_sf_app_wakee, 1);
+	else
+		atomic_set(&need_cnt_sf_app_wakee, 0);
+
+	return count;
 }
 
 static inline bool is_repetitive_pid(pid_t pid)
@@ -345,6 +452,7 @@ static ssize_t rt_info_proc_write(struct file *file, const char __user *buf,
 	char *iter = page;
 	struct task_struct *task;
 	pid_t pid;
+	unsigned long flags;
 
 	ret = simple_write_to_buffer(page, sizeof(page) - 1, ppos, buf, count);
 	if (ret <= 0)
@@ -352,7 +460,7 @@ static ssize_t rt_info_proc_write(struct file *file, const char __user *buf,
 
 	atomic_set(&have_valid_render_pid, 0);
 
-	write_lock(&rt_info_rwlock);
+	raw_spin_lock_irqsave(&rt_info_lock, flags);
 
 	for (i = 0; i < rt_num; i++) {
 		if (related_threads[i].task)
@@ -411,7 +519,7 @@ static ssize_t rt_info_proc_write(struct file *file, const char __user *buf,
 		}
 	}
 
-	write_unlock(&rt_info_rwlock);
+	raw_spin_unlock_irqrestore(&rt_info_lock, flags);
 
 	return count;
 }
@@ -424,13 +532,22 @@ static const struct proc_ops rt_info_proc_ops = {
 	.proc_release	= single_release,
 };
 
+static const struct proc_ops sf_app_wakee_proc_ops = {
+	.proc_open		= sf_app_wakee_thread_proc_open,
+	.proc_write		= sf_app_wakee_thread_proc_write,
+	.proc_read		= seq_read,
+	.proc_lseek		= seq_lseek,
+	.proc_release	= single_release,
+};
+
 static int rt_num_show(struct seq_file *m, void *v)
 {
 	char page[256] = {0};
 	ssize_t len = 0;
 	int i;
+	unsigned long flags;
 
-	read_lock(&rt_info_rwlock);
+	raw_spin_lock_irqsave(&rt_info_lock, flags);
 	len += snprintf(page + len, sizeof(page) - len, "rt_num=%d total_num=%d\n",
 		rt_num, total_num);
 	for (i = 0; i < rt_num; i++) {
@@ -438,7 +555,7 @@ static int rt_num_show(struct seq_file *m, void *v)
 			related_threads[i].task->tgid, related_threads[i].task->pid,
 			related_threads[i].task->comm);
 	}
-	read_unlock(&rt_info_rwlock);
+	raw_spin_unlock_irqrestore(&rt_info_lock, flags);
 
 	seq_puts(m, page);
 
@@ -484,28 +601,62 @@ bool rt_info_top_k(int k, pid_t *pid)
 	return ret;
 }
 
-int get_critical_task_state(const char *name, pid_t pid)
+int check_task_name(const char *name)
 {
+	int name_len;
+	if (!name || strlen(name) >= TASK_COMM_LEN) {
+		return -1;
+	}
 	if (total_num <= 0 || atomic_read(&have_valid_render_pid) == 0) {
 		return -1;
 	}
-	struct task_struct *task = NULL;
-	int name_len = strlen(name);
-	for (int i = 0; i < total_num; i++) {
+	name_len = strlen(name);
+	return name_len;
+}
+
+int get_critical_task_by_name(const char *name, struct task_struct **task)
+{
+	int name_len, i;
+	unsigned long flags;
+
+	name_len = check_task_name(name);
+
+	if (name_len < 0)
+		return -1;
+
+	raw_spin_lock_irqsave(&rt_info_lock, flags);
+	for (i = 0; i < total_num; i++) {
 		if (strncmp(name, related_threads[i].task->comm, name_len) == 0) {
-			task = related_threads[i].task;
+			*task = get_pid_task(find_vpid(related_threads[i].pid), PIDTYPE_PID);
 			break;
 		}
 	}
-	if (task == NULL || task_pid_nr(task) != pid) {
-		return -1;
-	}
+	raw_spin_unlock_irqrestore(&rt_info_lock, flags);
+	return 0;
+}
 
-	if (task_is_running(task)) {
-		return 0;
-	} else {
-		return 1;
+int get_critical_task_state(const char *name, pid_t pid)
+{
+	int state = -1;
+	int name_len, i;
+	unsigned long flags;
+
+	name_len = check_task_name(name);
+
+	if (name_len < 0)
+		return -1;
+
+	raw_spin_lock_irqsave(&rt_info_lock, flags);
+	for (i = 0; i < total_num; i++) {
+		if (strncmp(name, related_threads[i].task->comm, name_len) == 0) {
+			if (related_threads[i].pid == pid) {
+				state = task_is_running(related_threads[i].task) ? 0 : 1;
+			}
+			break;
+		}
 	}
+	raw_spin_unlock_irqrestore(&rt_info_lock, flags);
+	return state;
 }
 
 int rt_info_init(void)
@@ -514,6 +665,7 @@ int rt_info_init(void)
 
 	proc_create_data("rt_info", 0664, game_opt_dir, &rt_info_proc_ops, NULL);
 	proc_create_data("rt_num", 0444, game_opt_dir, &rt_num_proc_ops, NULL);
+	proc_create_data("sf_app_wakee_info", 0664, game_opt_dir, &sf_app_wakee_proc_ops, NULL);
 
 	return 0;
 }

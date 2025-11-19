@@ -2,6 +2,7 @@
 #include <linux/errno.h>
 #include <linux/spinlock.h>
 #include <linux/signal.h>
+#include <linux/cleanup.h>
 #include <trace/hooks/sched.h>
 #include <trace/hooks/cpufreq.h>
 
@@ -41,7 +42,6 @@ static struct list_head tracking_list = LIST_HEAD_INIT(tracking_list);
 static bool tt_user_enable;
 static int gc_running_cnt;
 static int loop_cnt;
-static int sig_task_pid;
 static struct task_struct *sig_task;
 
 static struct hrtimer gc_user_timer;
@@ -76,7 +76,6 @@ void init_tlt_stats(void)
 
 	gc_running_cnt = 0;
 	loop_cnt = 0;
-	sig_task_pid = 0;
 	sig_task = NULL;
 
 	hrtimer_init(&gc_user_timer, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
@@ -229,12 +228,30 @@ void tt_user_set(int pid, int value, bool set)
 
 	switch (value) {
 	case TASK_TRACK_USER_ENABLE: {
-		spin_lock(&g_lock);
-		WRITE_ONCE(sig_task_pid, current->pid);
-		WRITE_ONCE(sig_task, current);
-		WRITE_ONCE(tt_user_enable, set);
-		spin_unlock(&g_lock);
-		debug_trace_pr_val_str("sigpid", sig_task_pid);
+		scoped_guard(spinlock_irqsave, &g_lock) {
+			scoped_guard (rcu) {
+				if (pid > 0) {
+					task = find_task_by_vpid(pid);
+				} else {
+					task = current;
+				}
+				if (task) {
+					get_task_struct(task);
+				}
+			}
+			if (task != sig_task) {
+				if (sig_task) {
+					put_task_struct(sig_task);
+				}
+				sig_task = task;
+			} else {
+				if (task) {
+					put_task_struct(task);
+				}
+			}
+			WRITE_ONCE(tt_user_enable, set);
+		}
+		debug_trace_pr_val_str("sigpid", current->pid);
 	} break;
 
 	case TASK_TRACK_USER_GC: {
@@ -264,13 +281,22 @@ static void send_gc_action_sig(bool cancel)
 	siginfo.si_code = SI_KERNEL;
 	siginfo.si_int = (cancel ? TT_USER_SIG_CANCEL : 0) | TASK_TRACK_USER_GC;
 
-	if (sig_task_pid) {
-		rcu_read_lock();
-		task = find_task_by_vpid(sig_task_pid);
-		if (task && task == sig_task) {
-			send_sig_info(TT_USER_SIG, &siginfo, task);
+	scoped_guard(spinlock_irqsave, &g_lock) {
+		if (sig_task && sig_task->exit_state) {
+			put_task_struct(sig_task);
+			sig_task = NULL;
 		}
-		rcu_read_unlock();
+		if (sig_task) {
+			scoped_guard (rcu) {
+				get_task_struct(sig_task);
+				task = sig_task;
+			}
+		}
+	}
+
+	if (task) {
+		send_sig_info(TT_USER_SIG, &siginfo, task);
+		put_task_struct(task);
 	}
 
 	debug_trace_pr_val_str("gc", !cancel);
@@ -394,7 +420,7 @@ static void sched_switch_tt_user_handler(void *unused, bool preempt,
 	}
 
 	if (ts_to_gts(prev, &pgts)) {
-		if (pgts->tt_user.gc_tracking) {
+		if (game_pid == prev->tgid && pgts->tt_user.gc_tracking) {
 			spin_lock_irqsave(&g_lock, flags);
 			if (likely(gc_running_cnt > 0)) {
 				gc_running_cnt--;
@@ -404,7 +430,7 @@ static void sched_switch_tt_user_handler(void *unused, bool preempt,
 	}
 
 	if (ts_to_gts(next, &ngts)) {
-		if (ngts->tt_user.gc_tracking) {
+		if (game_pid == next->tgid && ngts->tt_user.gc_tracking) {
 			spin_lock_irqsave(&g_lock, flags);
 			gc_running_cnt++;
 			if (!hrtimer_active(&gc_user_timer)) {
@@ -611,7 +637,9 @@ static const struct proc_ops tlt_sys_ctrl_proc_ops = {
 	.proc_ioctl		=	tlt_ioctl,
 	.proc_open		=	tlt_proc_open,
 	.proc_write		=	tlt_write,
+#ifdef GAME_OPT_PROC_READ_DEBUG
 	.proc_read		=	seq_read,
+#endif /* GAME_OPT_PROC_READ_DEBUG */
 	.proc_release		=	tlt_proc_release,
 #if IS_ENABLED(CONFIG_COMPAT)
 	.proc_compat_ioctl	=	compat_tlt_ioctl,

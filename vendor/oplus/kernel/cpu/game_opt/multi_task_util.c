@@ -20,32 +20,9 @@
 static int process_num = 0;
 pid_t process_pids[PROCESS_PID_COUNT];
 
-static atomic_t enable_multi_task_util = ATOMIC_INIT(false);
+atomic_t enable_multi_task_util = ATOMIC_INIT(false);
 
 static DEFINE_RAW_SPINLOCK(g_lock);
-
-static struct task_struct* get_task_struct_by_pid(pid_t pid)
-{
-	struct task_struct *task = NULL;
-	rcu_read_lock();
-	task = find_task_by_vpid(pid);
-	rcu_read_unlock();
-	return task;
-}
-
-static struct game_task_struct* get_game_task_struct_by_pid(pid_t pid)
-{
-	struct task_struct *task = NULL;
-	struct game_task_struct *game_task = NULL;
-	rcu_read_lock();
-	task = find_task_by_vpid(pid);
-	if (!ts_to_gts(task, &game_task)) {
-		rcu_read_unlock();
-		return NULL;
-	}
-	rcu_read_unlock();
-	return game_task;
-}
 
 static void reset_task_util_info(void)
 {
@@ -526,7 +503,6 @@ static inline void update_task_runtime(struct task_struct *task, u64 runtime)
 		return;
 	}
 	rcu_read_unlock();
-
 
 	if (atomic_read(&tg_g_task->mtu_info.is_tracked) == 0 ||
 		atomic_read(&tg_g_task->mtu_info.have_valid_process_pids) == 0) {

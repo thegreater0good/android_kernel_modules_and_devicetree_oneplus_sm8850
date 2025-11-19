@@ -117,6 +117,7 @@ void oplus_panel_pl_check_enable(struct dsi_panel *panel);
 int oplus_sde_early_wakeup(struct dsi_panel *panel);
 int oplus_wait_for_vsync(struct dsi_panel *panel);
 void oplus_panel_timing_switch_frame_delay(struct dsi_panel *panel);
+void oplus_panel_all_timing_switch_frame_delay(struct dsi_panel *panel);
 void oplus_panel_frame_delay(struct dsi_panel *panel, u32 per_frame_us, u32 frame_delay_us);
 int oplus_display_panel_gamma_compensation(struct dsi_display *display);
 int oplus_dsi_panel_parse_lut(struct dsi_panel *panel);

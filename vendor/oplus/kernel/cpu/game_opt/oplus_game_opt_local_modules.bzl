@@ -29,6 +29,7 @@ def define_oplus_game_opt_local_modules():
             "game_opt/task_load_track.c",
             "game_opt/task_util.c",
             "game_opt/multi_task_util.c",
+            "game_opt/multi_rt_info.c",
             "game_opt/yield_opt.c",
             "game_opt/frame_load.c",
             "game_opt/frame_sync.c",

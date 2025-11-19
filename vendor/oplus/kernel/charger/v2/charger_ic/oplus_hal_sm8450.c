@@ -5482,7 +5482,7 @@ static int oplus_chg_set_input_current(struct battery_chg_dev *bcdev, int curren
 	struct oplus_mms *gauge_topic;
 	bool present;
 	int max_pdo_current;
-	int batt_volt;
+	int batt_volt = 0;
 	int type = 0;
 
 	prop_id = get_property_id(pst, POWER_SUPPLY_PROP_INPUT_CURRENT_LIMIT);

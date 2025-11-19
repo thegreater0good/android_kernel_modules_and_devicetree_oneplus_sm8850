@@ -1331,7 +1331,8 @@ static int sc6607_hk_get_adc(struct sc6607 *chip, enum SC6607_ADC_MODULE id)
 {
 	u32 reg = SC6607_REG_HK_IBUS_ADC + id * SC6607_ADC_REG_STEP;
 	u8 val[2] = { 0 };
-	u64 ret;
+	u64 ret = 0;
+	int rc = 0;
 	u8 adc_open = 0;
 
 	if (!chip)
@@ -1341,27 +1342,33 @@ static int sc6607_hk_get_adc(struct sc6607 *chip, enum SC6607_ADC_MODULE id)
 	if (!adc_open) {
 		if (id == SC6607_ADC_TSBUS || id == SC6607_ADC_TSBAT) {
 			if (chip->platform_data->ntc_suport_1000k) {
-				ret = sc6607_field_write(chip, F_ADC_EN, true);
-				if (ret < 0) {
-					chg_err("sc6607_field_write fail ret =%llu\n", ret);
+				rc = sc6607_field_write(chip, F_ADC_EN, true);
+				if (rc < 0) {
+					if (!chip->open_adc_by_vac)
+						sc6607_field_write(chip, F_ADC_EN, false);
+					chg_err("sc6607_field_write fail rc =%d\n", rc);
 					return 0;
 				}
 				mutex_lock(&chip->adc_read_lock);
 				msleep(ADC_DELAY_MS);
 				sc6607_field_write(chip, F_ADC_FREEZE, 1);
-				ret = sc6607_bulk_read(chip, reg, val, sizeof(val));
+				rc = sc6607_bulk_read(chip, reg, val, sizeof(val));
 				sc6607_field_write(chip, F_ADC_FREEZE, 0);
 				mutex_unlock(&chip->adc_read_lock);
-				if (ret < 0)
+				if (rc < 0) {
+                                        if (!chip->open_adc_by_vac)
+                                                sc6607_field_write(chip, F_ADC_EN, false);
 					return 0;
+				}
 
 				ret = val[1] + (val[0] << 8);
 				ret = sc6607_tsbus_tsbat_to_convert(chip, ret, id);
 				if (!chip->open_adc_by_vac)
 					sc6607_field_write(chip, F_ADC_EN, false);
-				return ret;
+				return (int)ret;
 			} else {
-				return sc6607_tsbus_tsbat_to_convert(chip, SC6607_ADC_TSBAT_DEFAULT, ADC_TSBUS_TSBAT_DEFAULT);
+				ret = sc6607_tsbus_tsbat_to_convert(chip, SC6607_ADC_TSBAT_DEFAULT, ADC_TSBUS_TSBAT_DEFAULT);
+				return (int)ret;
 			}
 		} else {
 			return 0;
@@ -1369,12 +1376,12 @@ static int sc6607_hk_get_adc(struct sc6607 *chip, enum SC6607_ADC_MODULE id)
 	}
 	mutex_lock(&chip->adc_read_lock);
 	sc6607_field_write(chip, F_ADC_FREEZE, 1);
-	ret = sc6607_bulk_read(chip, reg, val, sizeof(val));
+	rc = sc6607_bulk_read(chip, reg, val, sizeof(val));
 	sc6607_field_write(chip, F_ADC_FREEZE, 0);
 	mutex_unlock(&chip->adc_read_lock);
-	if (ret < 0) {
+	if (rc < 0)
 		return -EINVAL;
-	}
+
 	ret = val[1] + (val[0] << 8);
 	if (id == SC6607_ADC_TDIE) {
 		ret = (SC6607_ADC_IDTE_THD - ret) / 2;
@@ -1385,7 +1392,7 @@ static int sc6607_hk_get_adc(struct sc6607 *chip, enum SC6607_ADC_MODULE id)
 	} else {
 		ret *= sy6607_adc_step[id];
 	}
-	return ret;
+	return (int)ret;
 }
 
 static int sc6607_adc_read_ibus(struct sc6607 *chip)
@@ -3433,6 +3440,7 @@ static int oplus_sc6607_set_aicr(struct sc6607 *chip, int current_ma)
 	aicl_point_temp = aicl_point;
 	sc6607_set_input_current_limit(chip, usb_icl[i]);
 	msleep(AICL_DELAY_MS);
+	chg_vol = sc6607_adc_read_vbus_volt(chip);
 	if (chg_vol < aicl_point_temp) {
 		i = i - 2;
 		goto aicl_pre_step;

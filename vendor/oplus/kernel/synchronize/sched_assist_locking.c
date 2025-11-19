@@ -178,10 +178,6 @@ void enqueue_locking_thread(struct rq *rq, struct task_struct *p)
 	if (!rq || !p)
 		return;
 
-	/* add for kernel6.12 new feature */
-	if (p->se.sched_delayed)
-		return;
-
 	ots = get_oplus_task_struct(p);
 	orq = get_oplus_rq(rq);
 
@@ -295,6 +291,11 @@ void replace_next_task_fair_locking(struct rq *rq, struct task_struct **p,
 		}
 
 		key_se = &key_task->se;
+
+		/* add for kernel6.12 new feature */
+		if (key_se->sched_delayed){
+			continue;
+		}
 
 		if (!test_task_is_fair(key_task) || !task_inlock(key_ots)
 			|| (key_task->flags & PF_EXITING) || unlikely(!key_se) || test_task_ux(key_task)) {

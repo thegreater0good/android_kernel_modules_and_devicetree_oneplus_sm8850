@@ -419,7 +419,7 @@ static ssize_t pmicwd_config_proc_write(struct file *file, const char __user *bu
 		tmp_timeout = PMIC_WD_DEFAULT_TIMEOUT;
 	}
 	if(tmp_rstypt >= PON_POWER_OFF_MAX_TYPE || tmp_rstypt <= PON_POWER_OFF_RESERVED) {
-		if (get_eng_version() == AGING || get_eng_version() == HIGH_TEMP_AGING || get_eng_version() == FACTORY) {
+		if (get_eng_version() == AGING || get_eng_version() == HIGH_TEMP_AGING || get_eng_version() == FACTORY || get_eng_version() == PREVERSION) {
 			tmp_rstypt = PON_POWER_OFF_WARM_RESET;
 		} else {
 			tmp_rstypt = PON_POWER_OFF_HARD_RESET;
@@ -629,13 +629,13 @@ static int pmicWd_pm_notifier(struct notifier_block *nb,
 		pmicwd_return_injected(PMICWD_INJECT_SUSPEND_PRE);
 		break;
 	case PM_POST_SUSPEND:
+		pmicwd_return_injected(PMICWD_INJECT_SUSPEND_POST);
 		if (pmicwd_enhance) {
 			pmicwd->suspend_state = PM_SUSPEND_POST;
 			hang_detect_enable = false;
 		} else {
 			pmicwd->suspend_state = 0;
 		}
-		pmicwd_return_injected(PMICWD_INJECT_SUSPEND_POST);
 		PWD_INFO("pmicwd finish resume\n");
 		break;
 	}
@@ -869,7 +869,7 @@ void pmicwd_init(struct platform_device *pdev) {
 
 	if(pmicwd->pmicwd_state) {
 		oplus_pon_pbs_int_cfg();
-		if (get_eng_version() == AGING || get_eng_version() == HIGH_TEMP_AGING || get_eng_version() == FACTORY) {
+		if (get_eng_version() == AGING || get_eng_version() == HIGH_TEMP_AGING || get_eng_version() == FACTORY || get_eng_version() == PREVERSION) {
 			pmicwd->pmicwd_state = PMIC_WD_DEFAULT_ENABLE | (PMIC_WD_DEFAULT_TIMEOUT << 8) |
 				(PON_POWER_OFF_WARM_RESET << 16);
 		} else {
@@ -899,7 +899,7 @@ void pmicwd_init(struct platform_device *pdev) {
 		#if PMIC_WD_DEFAULT_ENABLE
 		pmicwd->wd_task = kthread_create(pmicwd_kthread, NULL, "pmicwd");
 		if(pmicwd->wd_task) {
-			if (get_eng_version() == AGING  || get_eng_version() == HIGH_TEMP_AGING || get_eng_version() == FACTORY) {
+			if (get_eng_version() == AGING  || get_eng_version() == HIGH_TEMP_AGING || get_eng_version() == FACTORY || get_eng_version() == PREVERSION) {
 				qpnp_pon_wd_timer(PMIC_WD_DEFAULT_TIMEOUT, PON_POWER_OFF_WARM_RESET);
 			} else {
 				qpnp_pon_wd_timer(PMIC_WD_DEFAULT_TIMEOUT, PON_POWER_OFF_HARD_RESET);
@@ -931,7 +931,6 @@ void pmicwd_init(struct platform_device *pdev) {
 
 static int pmicwd_probe(struct platform_device *pdev) {
 	const __be32 *addr = NULL;
-	const __be32 *default_addr = (const __be32 *)0x800;
 	PWD_ERR("pmicwd_probe enter\n");
 
 	if (!sys_reset_dev) {
@@ -939,17 +938,18 @@ static int pmicwd_probe(struct platform_device *pdev) {
 		return -EPROBE_DEFER;
 	}
 
-
-	addr = of_get_address(pdev->dev.of_node, 0, NULL, NULL);
-	if (!addr) {
-		addr = default_addr;
-	}
 	pmicwd = (struct pmicwd_desc *)kzalloc(sizeof(struct pmicwd_desc), GFP_KERNEL);
 	if (!pmicwd) {
 		PWD_ERR("pmicwd init failed !\n");
 		return -1;
 	}
-	pmicwd->wd_base = be32_to_cpu(*addr);
+
+	addr = of_get_address(pdev->dev.of_node, 0, NULL, NULL);
+	if (addr != NULL) {
+	    pmicwd->wd_base = be32_to_cpu(*addr);
+	} else {
+	    pmicwd->wd_base = sys_reset_dev->base;
+	}
 	PWD_ERR("addr is 0x%x\n", pmicwd->wd_base);
 	pmicwd->pon = sys_reset_dev;
 
@@ -979,6 +979,8 @@ static void pmicwd_remove(struct platform_device *pdev)
 	}
 }
 #else
+static int pmicwd_remove(struct platform_device *pdev)
+{
 	if (pmicwd) {
 		if(pmicwd->pmicwd_state) {
 			remove_proc_entry("pmicwd_config", NULL);

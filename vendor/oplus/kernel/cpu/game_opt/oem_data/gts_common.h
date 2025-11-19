@@ -84,6 +84,22 @@ struct task_track_for_user
 	u8 gc_tracking;
 };
 
+struct render_related_thread {
+	pid_t pid;
+	struct task_struct *task;
+	u32 wake_count;
+};
+
+struct multi_rt_info {
+	pid_t *related_threads_sorted;
+	struct render_related_thread *related_threads;
+	int rt_num;
+	int total_num;
+	int rt_num_sorted;
+	int total_num_sorted;
+	atomic_t have_valid_render_pids;
+};
+
 struct game_task_struct
 {
 	struct task_struct *task;
@@ -113,8 +129,10 @@ struct game_task_struct
 	struct multi_task_util_info mtu_info;
 
 	struct thread_type thread_type;
-
 	struct task_track_for_user tt_user;
+
+	/* multi rt info*/
+	struct multi_rt_info mrt_info;
 } ____cacheline_aligned;
 
 static inline struct game_task_struct *get_game_task_struct(struct task_struct *p)
@@ -175,6 +193,13 @@ static inline void init_game_task_struct(void *ptr)
 	gts->thread_type.is_thread = THREAD_TYPE_UNKNOWN;
 	gts->thread_type.is_unitymain = THREAD_TYPE_UNKNOWN;
 	gts->tt_user.gc_tracking = 0;
+	gts->mrt_info.related_threads_sorted = NULL;
+	gts->mrt_info.related_threads = NULL;
+	gts->mrt_info.rt_num = 0;
+	gts->mrt_info.total_num = 0;
+	gts->mrt_info.rt_num_sorted = 0;
+	gts->mrt_info.total_num_sorted = 0;
+	atomic_set(&gts->mrt_info.have_valid_render_pids, 0);
 }
 
 #endif /* __GTS_COMMON_H__ */

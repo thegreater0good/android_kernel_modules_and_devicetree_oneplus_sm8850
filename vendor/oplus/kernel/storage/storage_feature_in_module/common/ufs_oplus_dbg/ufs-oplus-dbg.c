@@ -740,36 +740,47 @@ static void create_devinfo_ufs(void *data, async_cookie_t c)
 	static char temp_version[5] = {0};
 	static char vendor[9] = {0};
 	static char model[17] = {0};
+	static char version_name[16] = "ufs_version";
+	static char dev_name[16] = "ufs";
+	static char status_name[17] = "ufsplus_status";
 	int ret = 0;
 	struct ufs_hba *hba = NULL;
-
+#ifndef CONFIG_OPLUS_QCOM_UFS_DRIVER
+	struct ufs_mtk_host *host;
+	hba = shost_priv(sdev->host);
+	host = ufshcd_get_variant(hba);
+	if (host->host_id == 1) {
+		strncpy(version_name, "ufs_version_1", 13);
+		strncpy(dev_name, "ufs_1", 5);
+		strncpy(status_name, "ufsplus_status_1", 16);
+	}
+#endif
 	pr_info("get ufs device vendor/model/rev\n");
 	WARN_ON(!sdev);
 	strncpy(temp_version, sdev->rev, 4);
 	strncpy(vendor, sdev->vendor, 8);
 	strncpy(model, sdev->model, 16);
 
-	ret = register_device_proc("ufs_version", temp_version, vendor);
+	ret = register_device_proc(version_name, temp_version, vendor);
 
 	if (ret) {
 		pr_err("%s create ufs_version fail, ret=%d",__func__,ret);
 		return;
 	}
 
-	ret = register_device_proc("ufs", model, vendor);
+	ret = register_device_proc(dev_name, model, vendor);
 
 	if (ret) {
 		pr_err("%s create ufs fail, ret=%d",__func__,ret);
 	}
 
-	hba = shost_priv(sdev->host);
 	if (hba && ufshcd_is_wb_allowed(hba)) {
 		ufsplus_wb_status = 1;
 	}
 	if (hba && is_ufshpb_allowed(hba)) {
 		ufsplus_hpb_status = 1;
 	}
-	ret = register_device_proc_for_ufsplus("ufsplus_status", &ufsplus_hpb_status, &ufsplus_wb_status);
+	ret = register_device_proc_for_ufsplus(status_name, &ufsplus_hpb_status, &ufsplus_wb_status);
 	if (ret) {
 		pr_err("%s create , ret=%d",__func__,ret);
 	}
@@ -1213,13 +1224,31 @@ static struct proc_ops proc_ioctl_fops = {
 };
 
 static void ufs_oplus_ioctl_init(struct scsi_device *sdev) {
-	struct proc_dir_entry *oplus_ufs_proc_dir = proc_mkdir("ufs_oplus_dir", NULL);
+	struct proc_dir_entry *oplus_ufs_proc_dir;
 	struct proc_dir_entry *d_entry;
+#ifndef CONFIG_OPLUS_QCOM_UFS_DRIVER
+	struct ufs_hba *hba = NULL;
+	struct ufs_mtk_host *host;
+	hba = shost_priv(sdev->host);
+	host = ufshcd_get_variant(hba);
 
+	if (host->host_id == 0) {
+		oplus_ufs_proc_dir = proc_mkdir("ufs_oplus_dir", NULL);
+		if (!oplus_ufs_proc_dir)
+			return;
+		d_entry = proc_create_data("ufs_oplus_ioctl", 0644, oplus_ufs_proc_dir, &proc_ioctl_fops, sdev);
+	} else {
+		oplus_ufs_proc_dir = proc_mkdir("ufs_oplus_dir_1", NULL);
+		if (!oplus_ufs_proc_dir)
+			return;
+		d_entry = proc_create_data("ufs_oplus_ioctl_1", 0644, oplus_ufs_proc_dir, &proc_ioctl_fops, sdev);
+	}
+#else
+        oplus_ufs_proc_dir = proc_mkdir("ufs_oplus_dir", NULL);
 	if (!oplus_ufs_proc_dir)
-		return;
-
+	    return;
 	d_entry = proc_create_data("ufs_oplus_ioctl", 0644, oplus_ufs_proc_dir, &proc_ioctl_fops, sdev);
+#endif
 	if (!d_entry)
 		return;
 	return;
@@ -1230,7 +1259,7 @@ void ufs_oplus_init_sdev(struct scsi_device *sdev) {
             return;
 
 	if (atomic_inc_return(&ufs_init_done) == 1) {
-        	ufs_update_sdev(sdev);
+        ufs_update_sdev(sdev);
 		ufs_oplus_ioctl_init(sdev);
 	}
 }
@@ -1291,6 +1320,7 @@ void ufs_init_oplus_dbg(struct ufs_hba *hba)
 #endif /* CONFIG_COMPAT */
 #endif /* CONFIG_OPLUS_QCOM_UFS_DRIVER */
 #endif /* LINUX_VERSION_CODE >= KERNEL_VERSION(6, 6, 0) */
+	atomic_set(&ufs_init_done, 0);
 }
 EXPORT_SYMBOL_GPL(ufs_init_oplus_dbg);
 
@@ -1309,7 +1339,6 @@ static void __exit ufs_oplus_dbg_exit(void)
 
 static int __init ufs_oplus_dbg_init(void)
 {
-	atomic_set(&ufs_init_done, 0);
 	return 0;
 }
 

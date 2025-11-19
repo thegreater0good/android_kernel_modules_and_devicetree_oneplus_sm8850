@@ -77,15 +77,6 @@ static const char *socket_type_str[SOCKET_TYPE_COUNT] = {
 	"unknown"
 };
 
-/* scene_stat structs & globals*/
-struct scene_stat {
-	atomic_t status[SCENE_STATUS_COUNT];
-};
-
-struct scene_stats {
-	struct scene_stat per_scene_stat[SCENE_TYPES_COUNT];
-};
-
 static struct scene_stats g_scene_stat;
 
 /* socket_info structs & globals*/
@@ -102,13 +93,6 @@ struct socket_info g_socket_info[SOCKET_INFO_MAX_NUMBER];
 /* manager_info structs & globals*/
 static int g_manager_info_head = 0;
 static int g_manager_info_full = 0;
-
-struct manager_info {
-	char timestamp[TIMESTAMP_LEN];
-	char scene[SCENE_TYPE_MAX_LEN];
-	char action[SCENE_STATUS_MAX_LEN];
-	char package_name[ANDROID_PACKAGE_NAME_MAX_LEN];
-};
 
 struct manager_info g_manager_info[MANAGER_INFO_MAX_NUMBER];
 
@@ -322,6 +306,19 @@ static int show_stats(char *buf, u32 blen)
 
 err:
 	return -EFAULT;
+}
+
+int scene_stats_dump(struct scene_stats_snap *m_scene_stats_snap)
+{
+	int i, j;
+
+	for (i = 0; i < SCENE_TYPES_COUNT; i++) {
+		for (j = 0; j < SCENE_STATUS_COUNT - 1; j++) {
+			m_scene_stats_snap->per_scene_stat[i].status[j] =
+				atomic_read(&g_scene_stat.per_scene_stat[i].status[j]);
+		}
+	}
+	return 0;
 }
 
 static int compact_scene_stat_show(struct seq_file *m, void *v)
@@ -594,6 +591,49 @@ static int manager_info_show(struct seq_file *m, void *v)
 
 err:
 	kfree(buf);
+	return -EFAULT;
+}
+
+int manager_info_dump(char *buf, int buf_len)
+{
+	int i, ret, start, cnt, manager_idx, buf_idx = 0;
+
+	if (!buf)
+		return -ENOMEM;
+
+	ret = snprintf(&buf[buf_idx], (buf_len - buf_idx), "%-25s%-15s%-10s%-40s\n",
+			"time", "scene", "action", "package name");
+
+	if ((ret < 0) || (ret >= buf_len - buf_idx))
+		goto err;
+	buf_idx += ret;
+
+	if (g_manager_info_full) {
+		start = g_manager_info_head;
+		cnt = MANAGER_INFO_MAX_NUMBER;
+	} else {
+		start = 0;
+		cnt = g_manager_info_head;
+	}
+
+	for (i = 0; i < cnt; i++) {
+		manager_idx = (start + i) % MANAGER_INFO_MAX_NUMBER;
+
+		ret = snprintf(&buf[buf_idx], (buf_len - buf_idx), "%-25s%-15s%-10s%-40s\n",
+				g_manager_info[manager_idx].timestamp,
+				g_manager_info[manager_idx].scene,
+				g_manager_info[manager_idx].action,
+				g_manager_info[manager_idx].package_name);
+
+		if ((ret < 0) || (ret >= PAGE_SIZE - buf_idx))
+			goto err;
+		buf_idx += ret;
+	}
+
+	buf[buf_idx] = '\0';
+	buf[buf_len - 1] = '\0';
+	return 0;
+err:
 	return -EFAULT;
 }
 

@@ -61,7 +61,6 @@ struct spi_bus {
 	struct spi_device *spi_dev;
 	struct spi_param param;
 	bool bus_ready; /*spi or i2c resume status*/
-	bool cs_setup_support;
 #ifdef CONFIG_TOUCHPANEL_MTK_PLATFORM
 #else
 	struct spi_geni_qcom_ctrl_data delay_params;

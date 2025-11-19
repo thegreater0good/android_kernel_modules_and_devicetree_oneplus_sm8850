@@ -12,6 +12,7 @@
 #include "hmbird_II_export.h"
 #include "hmbird_II_freqgov.h"
 #include "hmbird_II_shadow_tick.h"
+#include "../hmbird_minidump.h"
 #include "hmbird_common.h"
 #include "hmbird_II_critical_task_monitor.h"
 #include <linux/sched/ext.h>
@@ -30,6 +31,8 @@ enum scx_ops_enable_state {
 	SCX_OPS_DISABLED,
 	SCX_OPS_DISABLING_SWITCH,
 };
+extern enum hmbird_switch_reason_type sw_reason;
+extern struct md_info_t *md_info;
 
 #define MAX_STATE 10
 const int scx2hmbird_state[MAX_STATE] = {1, 4, 2, 0, 3, 5, 6, 7, 8, 9};
@@ -71,7 +74,6 @@ void hmbird_state_systrace_c(void)
 	hmbird_II_output_systrace("C|9999|hmbird_state|%d\n", hmbird_state);
 }
 
-
 /*
  * workaround for a bug while disable sched_ext
  * This case is fixed in kernel 6.17 :
@@ -105,9 +107,10 @@ static void android_vh_scx_ops_enable_state(void *unused, int state)
 	int state_prev;
 	struct cpumask boost = { .bits[0] = 0xff };
 	state_prev = atomic_xchg(&hb_ops_enable_state_var, state);
-	if (state == SCX_OPS_DISABLED && state_prev != SCX_OPS_DISABLING_SWITCH)
+	if (state == SCX_OPS_DISABLED && state_prev != SCX_OPS_DISABLING_SWITCH) {
 		pr_warn("sched_ext: ops error detected without ops (SCX_OPS_DISABLING_SWITCH)\n");
-
+		sw_update(0, HMBIRD_DISABLED_WITHOUT_ING, HMBIRD_SWITCH_NORMAL);
+	}
 	if (state == SCX_OPS_ENABLING || state == SCX_OPS_DISABLING) {
 		hmbird_qos_request_min(&boost, FREQ_QOS_MAX_DEFAULT_VALUE);
 	} else {
@@ -121,12 +124,17 @@ static void android_vh_scx_ops_enable_state(void *unused, int state)
 	pr_info("hmbird_II: scx_ops_enable_state = %d\n", atomic_read(&hb_ops_enable_state_var));
 	if (unlikely(hmbird_debug & HMBIRD_DEBUG_SYSTRACE))
 		hmbird_state_systrace_c();
+
+	if (state >= 0 && state < MAX_STATE) {
+		sw_update(1, scx2hmbird_state[state], HMBIRD_SWITCH_NORMAL);
+	}
 }
 
 static void android_vh_scx_enabled(void *unused, int enabled)
 {
 	atomic_xchg(&__hb_ops_enabled, enabled);
 	pr_info("hmbird_II: scx %s\n", atomic_read(&__hb_ops_enabled) ? "enabled" : "disabled");
+	sw_update(1, enabled ? HMBIRD_ENABLED : HMBIRD_DISABLED, HMBIRD_SWITCH_NORMAL);
 }
 
 static void android_vh_task_should_scx(void *unused, int *should_scx, int policy, int prio)
@@ -284,6 +292,12 @@ static void trace_set_cpus_allowed_common(void *unused, struct task_struct *p, s
 		if (ctx->flags & SCA_USER)
 			swap(p->user_cpus_ptr, ctx->user_mask);
 	}
+}
+
+void get_scx_state(int *ops_enabled, int *ops_enable_state_var)
+{
+	*ops_enabled = atomic_read(&__hb_ops_enabled);
+	*ops_enable_state_var = atomic_read(&hb_ops_enable_state_var);
 }
 
 noinline int tracing_mark_write(const char *buf)
@@ -455,5 +469,6 @@ void hmbird_II_exit(void)
 {
 	hmbird_sysctl_deinit();
 	critical_task_monitor_deinit();
+	ko_exceps_update(KO_DEINITED, jiffies);
 }
 

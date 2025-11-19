@@ -100,6 +100,11 @@ static int oplus_panel_parse_common_config(struct dsi_panel *panel)
 	OPLUS_DSI_INFO("oplus,panel-60hz-timing-switch-frame-delay: %s\n",
 			panel->oplus_panel.timing_switch_frame_delay ? "true" : "false");
 
+	panel->oplus_panel.all_timing_switch_frame_delay = utils->read_bool(utils->data,
+			"oplus,panel-all-timing-switch-frame-delay");
+	OPLUS_DSI_INFO("oplus,panel-all-timing-switch-frame-delay: %s\n",
+			panel->oplus_panel.all_timing_switch_frame_delay ? "true" : "false");
+
 	return 0;
 }
 
@@ -431,6 +436,7 @@ void oplus_panel_parse_apuir_ds_list(struct dsi_panel *panel) {
 		up800nit_ds_count);
 
 	if (rc) {
+		kfree(up800nit_ds_list);
 		OPLUS_DSI_ERR("apuir up800nit_ds_list parse failed!\n");
 		return;
 	}
@@ -465,6 +471,7 @@ void oplus_panel_parse_apuir_ds_list(struct dsi_panel *panel) {
 			less800nit_ds_count);
 
 	if (rc) {
+		kfree(less800nit_ds_list);
 		OPLUS_DSI_ERR("apuir less800nit_ds_list parse failed!\n");
 		return;
 	}
