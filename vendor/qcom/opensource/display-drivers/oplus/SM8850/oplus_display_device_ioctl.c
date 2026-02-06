@@ -984,7 +984,6 @@ int oplus_display_panel_get_roundcorner(void *data)
 
 	return 0;
 }
-
 int oplus_display_panel_set_osc_track(u32 osc_status)
 {
 	struct dsi_display *display = get_main_display();
@@ -1009,11 +1008,13 @@ int oplus_display_panel_set_osc_track(u32 osc_status)
 				DSI_CORE_CLK, DSI_CLK_ON);
 	}
 
+#ifdef OPLUS_FEATURE_DISPLAY_OSC
 	if (osc_status) {
 		rc = dsi_panel_tx_cmd_set(display->panel, DSI_CMD_OSC_TRACK_ON, false);
 	} else {
 		rc = dsi_panel_tx_cmd_set(display->panel, DSI_CMD_OSC_TRACK_OFF, false);
 	}
+#endif
 	if (display->config.panel_mode == DSI_OP_CMD_MODE) {
 		rc = dsi_display_clk_ctrl(display->dsi_clk_handle,
 				DSI_CORE_CLK, DSI_CLK_OFF);
@@ -1272,7 +1273,9 @@ int oplus_panel_set_ffc_mode_unlock(struct dsi_panel *panel)
 		return rc;
 	}
 
+#ifdef OPLUS_FEATURE_DISPLAY_FFC
 	cmd_index = DSI_CMD_FFC_MODE0 + panel->oplus_panel.ffc_mode_index;
+#endif
 	rc = dsi_panel_tx_cmd_set(panel, cmd_index, false);
 
 	return rc;
@@ -1484,6 +1487,7 @@ int oplus_display_panel_set_hbm_max(void *data)
 	}
 	else {
 		if (panel->cur_mode->priv_info->cmd_sets[DSI_CMD_EXIT_HBM_MAX].count) {
+			oplus_ae174_apl_gamma_update(display, last_bl);
 			mutex_lock(&panel->panel_lock);
 			rc = dsi_panel_tx_cmd_set(panel, DSI_CMD_EXIT_HBM_MAX, false);
 			mutex_unlock(&panel->panel_lock);

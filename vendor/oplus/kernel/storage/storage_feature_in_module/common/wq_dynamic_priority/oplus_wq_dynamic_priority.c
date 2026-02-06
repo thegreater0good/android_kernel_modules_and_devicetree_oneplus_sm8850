@@ -74,6 +74,7 @@ static void android_rvh_create_worker_handler(void *unused,
 	if (attrs->nice == VIRTUAL_KWORKER_NORMAL_NICE ||
 		attrs->nice == VIRTUAL_KWORKER_KBLOCKD_NICE) {
 		oplus_set_ux_state_lock(task, SA_TYPE_LIGHT, -1, true);
+		set_user_nice(task, MIN_NICE);
 		if (task->comm[8] == 'u')
 			task->comm[8] = 'X';
 	}

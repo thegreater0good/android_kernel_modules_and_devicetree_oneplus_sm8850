@@ -51,6 +51,7 @@ struct boost_pool {
 	struct task_struct *prefill_task;
 	struct mutex prefill_lock;
 	int min, low, alloc;
+	int mml;
 	struct list_head list;
 	struct boost_page_pool *pools[NUM_ORDERS];
 };

@@ -1596,12 +1596,8 @@ static int sc6607_set_input_current_limit(struct sc6607 *chip, int curr)
 	if (!chip)
 		return -EINVAL;
 
-	if (curr < SC6607_BUCK_IINDPM_OFFSET) {
+	if (curr < SC6607_BUCK_IINDPM_OFFSET)
 		curr = SC6607_BUCK_IINDPM_OFFSET;
-		ret = sc6607_field_write(chip, F_DIS_BUCKCHG_PATH, true);
-	} else {
-		ret = sc6607_field_write(chip, F_DIS_BUCKCHG_PATH, false);
-	}
 
 	val = (curr - SC6607_BUCK_IINDPM_OFFSET) / SC6607_BUCK_IINDPM_STEP;
 	ret = sc6607_field_write(chip, F_IINDPM, val);
@@ -2502,6 +2498,7 @@ out:
 static int sc6607_dpdm_irq_handle(struct sc6607 *chip)
 {
 	int ret;
+	u8 hvdcp_en = false;
 	static int prev_vbus_type = SC6607_VBUS_TYPE_NONE;
 	unsigned int prev_chg_type = POWER_SUPPLY_TYPE_UNKNOWN;
 	unsigned int cur_chg_type = POWER_SUPPLY_TYPE_UNKNOWN;
@@ -2509,7 +2506,9 @@ static int sc6607_dpdm_irq_handle(struct sc6607 *chip)
 	if (!chip)
 		return -EINVAL;
 
-	sc6607_set_input_current_limit(chip, SC6607_DEFAULT_IBUS_MA);
+	sc6607_field_read(chip, F_HVDCP_EN, &hvdcp_en);
+	if (!hvdcp_en)
+		sc6607_set_input_current_limit(chip, SC6607_DEFAULT_IBUS_MA);
 	sc6607_bc12_timeout_cancel(chip);
 	prev_chg_type = chip->oplus_chg_type;
 	ret = sc6607_get_charger_type(chip, &cur_chg_type);
@@ -3339,11 +3338,6 @@ static int oplus_sc6607_set_aicr(struct sc6607 *chip, int current_ma)
 	chg_info("usb input max current limit=%d, aicl_point_temp=%d \n", current_ma,
 			aicl_point_temp);
 
-	if (current_ma <= 0) {
-		sc6607_set_input_current_limit(chip, 0);
-		return 0;
-	}
-
 	if (chip->usb_aicl_enhance) {
 		sc6607_input_present(chip->ic_dev, &present);
 		rc = sc6607_get_bc12_result(chip->ic_dev, &charger_type);
@@ -3375,6 +3369,11 @@ static int oplus_sc6607_set_aicr(struct sc6607 *chip, int current_ma)
 		} else {
 			oplus_chg_suspend_charger(false, PD_PDO_ICL_VOTER);
 		}
+	}
+
+	if (current_ma <= 0) {
+		sc6607_set_input_current_limit(chip, 0);
+		return 0;
 	}
 
 	if (current_ma < 500) {
@@ -4227,6 +4226,7 @@ static int sc6607_qc_detect_enable(struct oplus_chg_ic_dev *ic_dev, bool en)
 	int retry = QC_DETECT_RETRY;
 	u8 vbus_stat;
 	struct sc6607 *chip;
+	struct votable *icl_votable;
 
 	if (ic_dev == NULL) {
 		chg_err("ic_dev is NULL");
@@ -4265,7 +4265,13 @@ static int sc6607_qc_detect_enable(struct oplus_chg_ic_dev *ic_dev, bool en)
 			break;
 		}
 	}
-
+	if (chip->oplus_chg_type != POWER_SUPPLY_TYPE_USB_HVDCP) {
+		icl_votable = find_votable("WIRED_ICL");
+		if (!icl_votable)
+			chg_err("WIRED_ICL votable not found\n");
+		else
+			rerun_election(icl_votable, true);
+	}
 	sc6607_detect_release(chip);
 	return 0;
 }
@@ -4953,6 +4959,17 @@ static void sc6607_subscribe_comm_topic(struct oplus_mms *topic, void *prv_data)
 	}
 }
 
+static void sc6607_subscribe_wired_topic(struct oplus_mms *topic,
+					   void *prv_data)
+{
+	struct sc6607 *chip = prv_data;
+	/* waiting for wired initial and report bc12-complete, needn't callback */
+	if (chip->oplus_chg_type != POWER_SUPPLY_TYPE_UNKNOWN) {
+		chg_info("report bc12 complete again\n");
+		oplus_chg_ic_virq_trigger(chip->ic_dev, OPLUS_IC_VIRQ_BC12_COMPLETED);
+	}
+}
+
 #ifdef CONFIG_OPLUS_CHARGER_MTK
 static struct charger_ops sc6607_chg_ops = {
 	.plug_in = sc6607_plug_in,
@@ -5079,6 +5096,7 @@ static int pd_tcp_notifier_call(struct notifier_block *nb, unsigned long event, 
 	int i;
 	struct tcp_notify *noti = data;
 	struct sc6607 *chip = container_of(nb, struct sc6607, pd_nb);
+	uint8_t new_state = TYPEC_UNATTACHED;
 
 	switch (event) {
 	case TCP_NOTIFY_PR_SWAP:
@@ -5098,6 +5116,14 @@ static int pd_tcp_notifier_call(struct notifier_block *nb, unsigned long event, 
 			oplus_chg_suspend_charger(true, TCPC_IBUS_DRAW_VOTER);
 			schedule_delayed_work(&chip->charger_suspend_recovery_work,
 			                      msecs_to_jiffies(SUSPEND_RECOVERY_DELAY_MS));
+		}
+		break;
+
+	case TCP_NOTIFY_TYPEC_STATE:
+		new_state = noti->typec_state.new_state;
+		if (new_state == TYPEC_UNATTACHED) {
+			chip->pr_swap = false;
+			chg_info("typec unattach, set pr_swap false!\n");
 		}
 		break;
 
@@ -5304,6 +5330,7 @@ static int sc6607_buck_probe(struct i2c_client *client, const struct i2c_device_
 	INIT_DELAYED_WORK(&chip->sourcecap_done_work, oplus_sourcecap_done_work);
 	INIT_DELAYED_WORK(&chip->charger_suspend_recovery_work, oplus_charger_suspend_recovery_work);
 	oplus_mms_wait_topic("common", sc6607_subscribe_comm_topic, chip);
+	oplus_mms_wait_topic("wired", sc6607_subscribe_wired_topic, chip);
 	chg_info("end!\n");
 	return 0;
 

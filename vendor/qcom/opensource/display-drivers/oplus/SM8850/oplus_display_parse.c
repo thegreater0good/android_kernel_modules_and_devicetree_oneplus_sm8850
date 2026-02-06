@@ -84,6 +84,9 @@ static int oplus_panel_parse_common_config(struct dsi_panel *panel)
 	panel->oplus_panel.gamma_compensation_support = utils->read_bool(utils->data, "oplus,gamma-compensation-support");
 	OPLUS_DSI_INFO("panel gamma compensation support: %s\n", panel->oplus_panel.gamma_compensation_support ? "Yes" : "Not");
 
+	panel->oplus_panel.gamma_ae174_compensation_support = utils->read_bool(utils->data, "oplus,panel-ae174-gamma-compensation-support");
+	OPLUS_DSI_INFO("panel ae174 gamma compensation support: %s\n", panel->oplus_panel.gamma_ae174_compensation_support ? "Yes" : "Not");
+
 	panel->oplus_panel.pl_check_enable = utils->read_bool(utils->data, "oplus,pcd-lvd-check-enable");
 	OPLUS_DSI_INFO("oplus,pcd-lvd-check-enable: %s\n", panel->oplus_panel.pl_check_enable ? "Yes" : "Not");
 	if (panel->oplus_panel.pl_check_enable) {

@@ -14,6 +14,7 @@ ccflags-$(CONFIG_OPLUS_PD_MANAGER_CHARGER) += -I$(srctree)/drivers/usb/typec/tcp
 ccflags-$(CONFIG_OPLUS_PD_EXT_SUPPORT) += -I$(srctree)/drivers/power/oplus/pd_ext/inc
 ccflags-$(CONFIG_OPLUS_MT6375_CHARGER) += -I$(srctree)/drivers/misc/mediatek/typec/tcpc/inc
 ccflags-$(CONFIG_OPLUS_MT6379_CHARGER) += -I$(srctree)/drivers/misc/mediatek/typec/tcpc/inc
+ccflags-$(CONFIG_OPLUS_MT6769_CHARGER) += -I$(DEVICE_MODULES_PATH)/drivers/power/oplus/pd_ext/inc
 ccflags-y += -I$(srctree)/$(src)/ufcs/include
 ccflags-$(CONFIG_OPLUS_DYNAMIC_CONFIG_CHARGER) += -I$(srctree)/$(src)/../config
 ccflags-y += -Werror=parentheses
@@ -38,6 +39,11 @@ ccflags-$(CONFIG_OPLUS_MT6375_CHARGER) += -I$(DEVICE_MODULES_PATH)/drivers/power
 ccflags-$(CONFIG_OPLUS_MT6375_CHARGER) += -I$(DEVICE_MODULES_PATH)/drivers/gpu/drm/mediatek/mediatek_v2
 ccflags-$(CONFIG_OPLUS_MT6375_CHARGER) += -I$(DEVICE_MODULES_PATH)/drivers/base/kernelFwUpdate
 
+ccflags-$(CONFIG_OPLUS_MT6769_CHARGER) += -I$(DEVICE_MODULES_PATH)/drivers/misc/mediatek/usb20/
+ccflags-$(CONFIG_OPLUS_MT6769_CHARGER) += -I$(DEVICE_MODULES_PATH)/drivers/power/supply
+ccflags-$(CONFIG_OPLUS_MT6769_CHARGER) += -I$(DEVICE_MODULES_PATH)/drivers/gpu/drm/mediatek/mediatek_v2
+ccflags-$(CONFIG_OPLUS_MT6769_CHARGER) += -I$(DEVICE_MODULES_PATH)/drivers/base/kernelFwUpdate
+
 ccflags-$(CONFIG_OPLUS_MT6379_CHARGER) += -I$(DEVICE_MODULES_PATH)/drivers/power/supply
 ccflags-$(CONFIG_OPLUS_MT6379_CHARGER) += -I$(DEVICE_MODULES_PATH)/drivers/gpu/drm/mediatek/mediatek_v2
 ccflags-$(CONFIG_OPLUS_MT6379_CHARGER) += -I$(DEVICE_MODULES_PATH)/drivers/base/kernelFwUpdate
@@ -61,6 +67,7 @@ oplus_chg_v2-y += oplus_smart_chg.o
 oplus_chg_v2-y += oplus_chg_pps.o
 oplus_chg_v2-y += oplus_batt_bal.o
 oplus_chg_v2-y += oplus_chg_mutual.o
+oplus_chg_v2-y += oplus_reverse_chg.o
 oplus_chg_v2-$(CONFIG_OPLUS_CHG_PARALLEL) += oplus_parallel.o
 
 oplus_chg_v2-y += gauge_ic/oplus_hal_bq27541.o
@@ -90,6 +97,7 @@ oplus_chg_v2-y += hal/oplus_virtual_ufcs.o
 oplus_chg_v2-y += hal/oplus_virtual_platufcs.o
 oplus_chg_v2-y += hal/oplus_virtual_batt_bal.o
 oplus_chg_v2-y += hal/oplus_virtual_level_shift.o
+oplus_chg_v2-y += hal/oplus_virtual_reverse_chg.o
 
 oplus_chg_v2-y += mms/oplus_mms.o
 oplus_chg_v2-y += mms/oplus_msg_filter.o
@@ -112,6 +120,7 @@ oplus_chg_v2-y += monitor/oplus_monitor_core.o
 oplus_chg_v2-y += monitor/oplus_chg_track.o
 oplus_chg_v2-y += monitor/oplus_chg_exception.o
 oplus_chg_v2-y += plat_ufcs/plat_ufcs_notify.o
+oplus_chg_v2-y += oplus_chg_dual_cells_protection.o
 
 oplus_chg_v2-$(CONFIG_OPLUS_CHG_RECOVERY) += recovery/oplus_chg_recovery.o
 oplus_chg_v2-$(CONFIG_OPLUS_CHG_STATE_KEEP) += recovery/state_keep/state_keep.o
@@ -132,6 +141,7 @@ oplus_chg_v2-$(CONFIG_OPLUS_PD_MANAGER_CHARGER) += charger_ic/oplus_hal_pd_manag
 oplus_chg_v2-$(CONFIG_OPLUS_PD_EXT_SUPPORT) += charger_ic/oplus_hal_pd_manager.o
 oplus_chg_v2-$(CONFIG_OPLUS_MT6375_CHARGER) += charger_ic/oplus_hal_mtk6895S.o
 oplus_chg_v2-$(CONFIG_OPLUS_MT6835_CHARGER) += charger_ic/oplus_hal_mtk6895S.o
+oplus_chg_v2-$(CONFIG_OPLUS_MT6769_CHARGER) += charger_ic/oplus_hal_mtk6895S.o
 oplus_chg_v2-$(CONFIG_OPLUS_MT6375_CHARGER) += charger_ic/oplus_hal_mt6375.o
 oplus_chg_v2-$(CONFIG_OPLUS_MT6379_CHARGER) += charger_ic/oplus_hal_mtk6991V.o
 oplus_chg_v2-$(CONFIG_OPLUS_ADSP_SM8450_CHARGER) += charger_ic/oplus_hal_sm8450.o
@@ -141,6 +151,7 @@ oplus_chg_v2-$(CONFIG_OPLUS_SY6603_BATT_BAL) += batt_bal_ic/oplus_hal_sy6603.o
 oplus_chg_v2-$(CONFIG_OPLUS_SC7637_LEVEL_SHIFT) += level_shift_ic/oplus_hal_sc7637.o
 oplus_chg_v2-$(CONFIG_OPLUS_MT6375_CHARGER) += gauge_ic/oplus_hal_mtk_platform_gauge.o
 oplus_chg_v2-$(CONFIG_OPLUS_MT6835_CHARGER) += gauge_ic/oplus_hal_mtk_platform_gauge.o
+oplus_chg_v2-$(CONFIG_OPLUS_MT6769_CHARGER) += gauge_ic/oplus_hal_mtk_platform_gauge.o
 oplus_chg_v2-$(CONFIG_GAUGE_MT6379) += gauge_ic/oplus_hal_mtk_platform_gauge.o
 oplus_chg_v2-$(CONFIG_OPLUS_CHARGER_OPTIGA) += gauge_ic/oplus_optiga/ECC/Optiga_Ecc.o
 oplus_chg_v2-$(CONFIG_OPLUS_CHARGER_OPTIGA) += gauge_ic/oplus_optiga/ECC/Optiga_Math.o

@@ -12,6 +12,7 @@
 #include "hmbird_CameraScene/hmbird_CameraScene.h"
 #include "hmbird_II/hmbird_II_export.h"
 #include "hmbird_II/hmbird_II.h"
+#include "hmbird_II/hmbird_II_freqgov.h"
 #include "hmbird_kfunc.h"
 #include "hmbird_common.h"
 #include "hmbird_dfx.h"
@@ -35,6 +36,35 @@ __bpf_kfunc_start_defs();
 __bpf_kfunc unsigned int hb_bpf_hmbird_bpf_log_level(void)
 {
 	return hmbird_bpf_log_level;
+}
+
+static bool locking_protect_enable(void)
+{
+	return (g_opt_enable & LK_PROTECT_ENABLE);
+}
+
+__bpf_kfunc bool hb_bpf_task_inlock(struct task_struct *p)
+{
+	struct oplus_task_struct *ots = get_oplus_task_struct(p);
+
+	if (!locking_protect_enable())
+		return 0;
+
+	return ots && ots->locking_start_time > 0;
+}
+
+__bpf_kfunc void hb_bpf_locking_state_systrace_c(unsigned int cpu, struct task_struct *p)
+{
+	if (!locking_protect_enable())
+		return;
+
+	return locking_state_systrace_c(cpu, p);
+}
+
+__bpf_kfunc u32 hb_bpf_get_tl_from_perf(unsigned int cpu, u32 perf)
+{
+
+	return get_tl_from_perf(cpu, perf);
 }
 
 __bpf_kfunc bool hb_bpf_is_ux(struct task_struct *p)
@@ -71,6 +101,50 @@ __bpf_kfunc int hb_bpf_tracing_mark_write(const char *buf)
 __bpf_kfunc unsigned int hb_bpf_cfg_hmbird_debug(void)
 {
 	return hmbird_debug;
+}
+
+static inline bool ops_cpu_valid(int cpu)
+{
+	return (cpu >= 0 && cpu < nr_cpu_ids && cpu_possible(cpu));
+}
+
+__bpf_kfunc void hb_bpf_cpuperf_set(int cpu, u32 perf, unsigned int flags)
+{
+	struct rq *rq;
+	if (!ops_cpu_valid(cpu)) {
+		HMBIRD_ERR("Invalid cpu[%d] from scx_bpf_update_freq", cpu);
+		return;
+	}
+
+	rq = cpu_rq(cpu);
+	rq->scx.cpuperf_target = perf;
+
+	rcu_read_lock_sched_notrace();
+	cpufreq_update_util(rq, flags);
+	rcu_read_unlock_sched_notrace();
+}
+
+__bpf_kfunc int hb_bpf_task_sched_class(struct task_struct *p)
+{
+	if (addr_ext_sched_class && p->sched_class == addr_ext_sched_class)
+		return TASK_EXT_CLASS;
+	else if (addr_stop_sched_class && p->sched_class == addr_stop_sched_class)
+		return TASK_STOP_CLASS;
+	else if (addr_dl_sched_class && p->sched_class == addr_dl_sched_class)
+		return TASK_DL_CLASS;
+	else if (addr_rt_sched_class && p->sched_class == addr_rt_sched_class)
+		return TASK_RT_CLASS;
+	else if (addr_fair_sched_class && p->sched_class == addr_fair_sched_class)
+		return TASK_FAIR_CLASS;
+	else if (is_idle_task(p))
+		return TASK_IDLE_CLASS;
+	else
+		return TASK_UNKNOWN_CLASS;
+}
+
+__bpf_kfunc int hb_bpf_scx_enabled(void)
+{
+	return atomic_read(&__hb_ops_enabled);
 }
 
 __bpf_kfunc __nocfi struct scx_dispatch_q *hb_bpf_find_user_dsq(u64 dsq_id)
@@ -272,6 +346,9 @@ __bpf_kfunc_end_defs();
 BTF_KFUNCS_START(hmbird_kfunc_ids_any)
 /* hmbird common kfunc interface */
 BTF_ID_FLAGS(func, hb_bpf_hmbird_bpf_log_level);
+BTF_ID_FLAGS(func, hb_bpf_task_inlock);
+BTF_ID_FLAGS(func, hb_bpf_locking_state_systrace_c);
+BTF_ID_FLAGS(func, hb_bpf_get_tl_from_perf);
 BTF_ID_FLAGS(func, hb_bpf_is_ux);
 BTF_ID_FLAGS(func, hb_bpf_get_ux_state);
 BTF_ID_FLAGS(func, hb_bpf_is_vip_mvp);
@@ -280,6 +357,9 @@ BTF_ID_FLAGS(func, hb_bpf_cfg_hmbird_debug);
 BTF_ID_FLAGS(func, hb_bpf_exceps_update);
 BTF_ID_FLAGS(func, hb_bpf_snap_misc_update);
 BTF_ID_FLAGS(func, hb_bpf_snap_dsq_update);
+BTF_ID_FLAGS(func, hb_bpf_cpuperf_set);
+BTF_ID_FLAGS(func, hb_bpf_task_sched_class);
+BTF_ID_FLAGS(func, hb_bpf_scx_enabled);
 
 /* hmbird II bpf kfunc interface */
 BTF_ID_FLAGS(func, hb_bpf_find_user_dsq);

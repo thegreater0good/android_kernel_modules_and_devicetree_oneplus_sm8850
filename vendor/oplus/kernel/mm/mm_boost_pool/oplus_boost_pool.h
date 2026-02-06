@@ -13,6 +13,9 @@
 #else
 #include "page_pool.h"
 #endif
+#if IS_ENABLED(CONFIG_OPLUS_FEATURE_AIZEROCOPY)
+#include "aizerofs/aizerofs_shrink.h"
+#endif
 
 #define LOWORDER_WATER_MASK (64*4)
 
@@ -32,8 +35,14 @@ struct dynamic_boost_pool {
 
 int dynamic_boost_pool_free(struct dynamic_boost_pool *pool, struct page *page,
 			    int index);
+#if IS_ENABLED(CONFIG_OPLUS_FEATURE_AIZEROCOPY)
+void dynamic_boost_pool_alloc_pack(struct dynamic_boost_pool *boost_pool, unsigned long *size_remaining_p,
+					unsigned int *max_order_p, struct list_head *pages_p, int *i_p,
+					struct aizerofs_dma_buf_cache *dbuf_cache, u64 *page_idx_p);
+#else
 void dynamic_boost_pool_alloc_pack(struct dynamic_boost_pool *boost_pool, unsigned long *size_remaining_p,
 				   unsigned int *max_order_p, struct list_head *pages_p, int *i_p);
+#endif
 struct dynamic_boost_pool *dynamic_boost_pool_create_pack(void);
 
 #endif /* _ION_BOOST_POOL_H */

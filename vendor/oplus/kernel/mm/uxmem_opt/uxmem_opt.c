@@ -581,6 +581,7 @@ static inline bool current_is_key_task(void)
 	return test_task_ux(current) || rt_task(current)
 		|| test_bit(IM_FLAG_SURFACEFLINGER, &im_flag)
 		|| test_bit(IM_FLAG_SYSTEMSERVER_PID, &im_flag)
+		|| ta_task(current)
 		|| (current->flags & PF_WQ_WORKER);
 }
 

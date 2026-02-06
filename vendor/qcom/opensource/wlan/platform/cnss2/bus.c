@@ -727,6 +727,20 @@ void cnss_bus_soc_reset_cause_reg_dump(struct cnss_plat_data *plat_priv)
 	}
 }
 
+void cnss_bus_notify_mhi_error(struct cnss_plat_data *plat_priv)
+{
+	if (!plat_priv)
+		return;
+
+	switch (plat_priv->bus_type) {
+	case CNSS_BUS_PCI:
+		cnss_pci_notify_mhi_error(plat_priv->bus_priv);
+		break;
+	default:
+		cnss_pr_dbg("Unsupported bus type: %d\n", plat_priv->bus_type);
+	}
+}
+
 int cnss_bus_get_iova(struct cnss_plat_data *plat_priv, u64 *addr, u64 *size)
 {
 	if (!plat_priv)

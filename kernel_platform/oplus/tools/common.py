@@ -1,4 +1,5 @@
 import gzip
+import hashlib
 import shutil
 import os
 import subprocess
@@ -813,3 +814,24 @@ def upload_files_to_server(user, password, local_dir, paths, remote_address):
         else:
             print("prebuilt mode")
             upload_file(local_path, remote_path)
+
+def calculate_file_md5(file_path):
+    """
+    Calculate the MD5 value of a single file.
+
+    :param file_path: Path to the file
+    :return: MD5 value of the file as a string. Returns None if the file does not exist or
+    an error occurs while reading.
+    """
+    if not os.path.isfile(file_path):
+        return None
+
+    try:
+        md5 = hashlib.md5()
+        with open(file_path, 'rb') as f:
+            for chunk in iter(lambda: f.read(4096), b""):
+                md5.update(chunk)
+        return md5.hexdigest()
+    except Exception as e:
+        print("Error reading file {}: {}".format(file_path, e))
+        return None

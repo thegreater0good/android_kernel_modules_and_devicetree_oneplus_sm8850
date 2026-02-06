@@ -712,10 +712,19 @@ ssize_t hybridswap_report_show(struct device *dev,
 	return hybridswap_error_record_show(buf);
 }
 
+static inline int read_esuo_pages(struct hybridswap_stat *stat)
+{
+	unsigned long eswap_used_pages = atomic64_read(&stat->stored_pages);
+#if IS_ENABLED(CONFIG_OPLUS_FEATURE_MM_OSVELTE) && IS_ENABLED(CONFIG_OPLUS_FEATURE_MM_EZRECLAIMD)
+	if (ezreclaimd_enable)
+		return atomic_read(&ezreclaimable_nr) << (PAGE_SHIFT - 10);
+#endif /* CONFIG_OPLUS_FEATURE_MM_OSVELTE && CONFIG_OPLUS_FEATURE_MM_EZRECLAIMD */
+	return (int) (eswap_used_pages << (PAGE_SHIFT - 10));
+}
+
 static inline ssize_t meminfo_show(struct hybridswap_stat *stat, char *buf, ssize_t len)
 {
 	unsigned long eswap_total_pages = 0, eswap_compressed_pages = 0;
-	unsigned long eswap_used_pages = 0;
 	unsigned long zram_total_pags, zram_used_pages, zram_compressed;
 	ssize_t size = 0;
 
@@ -723,7 +732,6 @@ static inline ssize_t meminfo_show(struct hybridswap_stat *stat, char *buf, ssiz
 		return 0;
 
 	(void)hybridswap_stored_info(&eswap_total_pages, &eswap_compressed_pages);
-	eswap_used_pages = atomic64_read(&stat->stored_pages);
 #ifdef CONFIG_HYBRIDSWAP_SWAPD
 	zram_total_pags = hybridswapd_ops->zram_total_pages();
 #else
@@ -736,8 +744,8 @@ static inline ssize_t meminfo_show(struct hybridswap_stat *stat, char *buf, ssiz
 			  "EST:", eswap_total_pages << (PAGE_SHIFT - 10));
 	size += scnprintf(buf + size, len - size, "%-32s %12lu KB\n",
 			  "ESU_C:", eswap_compressed_pages << (PAGE_SHIFT - 10));
-	size += scnprintf(buf + size, len - size, "%-32s %12lu KB\n",
-			  "ESU_O:", eswap_used_pages << (PAGE_SHIFT - 10));
+	size += scnprintf(buf + size, len - size, "%-32s %12d KB\n",
+			  "ESU_O:", read_esuo_pages(stat));
 	size += scnprintf(buf + size, len - size, "%-32s %12lu KB\n",
 			  "ZST:", zram_total_pags << (PAGE_SHIFT - 10));
 	size += scnprintf(buf + size, len - size, "%-32s %12lu KB\n",
@@ -4538,7 +4546,7 @@ void hybridswap_track(struct zram *zram, u32 index,
 
 	hybs = MEMCGRP_ITEM_DATA(memcg);
 	if (!hybs) {
-		hybs = hybridswap_cache_alloc(memcg, true);
+		hybs = hybridswap_cache_alloc(memcg, true, false);
 		if (!hybs) {
 			stat = hybridswap_get_stat_obj();
 			if (stat)

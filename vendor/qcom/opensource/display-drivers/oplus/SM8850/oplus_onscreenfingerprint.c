@@ -312,6 +312,8 @@ int oplus_ofp_init(void *dsi_panel)
 			p_oplus_ofp_params->video_mode_aod_on_set_wq = create_singlethread_workqueue("oplus_video_mode_aod_on_set_wq");
 			INIT_WORK(&p_oplus_ofp_params->oplus_video_mode_30hz_aod_on_work, oplus_ofp_video_mode_30hz_aod_on_handler);
 		}
+
+		p_oplus_ofp_params->aod_layer_disappeard_bl_ready = 1;
 	}
 
 	/* indicates how many frames cost from aod off cmd sent to normal frame */
@@ -1590,6 +1592,92 @@ int oplus_ofp_lhbm_backlight_update(void *sde_encoder_virt, void *dsi_panel, uns
 	return rc;
 }
 
+int oplus_ofp_lhbm_ae174_pressed_gamma_update(void *dsi_panel, unsigned int bl_level, bool entering_lhbm)
+{
+	int rc = 0;
+	int i = 0;
+	unsigned int lcm_cmd_count = 0;
+	struct dsi_panel *panel = dsi_panel;
+	struct dsi_cmd_desc *cmds = NULL;
+	struct LCM_setting_table lhbm_on_cmd[6];
+	unsigned int r_fpr_ratio = 11234;
+	unsigned int g_fpr_ratio = 11624;
+	unsigned int b_fpr_ratio = 11394;
+	unsigned int r_regs = 0;
+	unsigned int g_regs = 0;
+	unsigned int b_regs = 0;
+	struct panel_ae174_gamma *ae174_gamma = get_panel_ae174_gamma();
+
+	OFP_DEBUG("start\n");
+
+	if (!oplus_ofp_local_hbm_is_enabled()) {
+		OFP_ERR("local hbm is not enabled, no need to update lhbm vdc\n");
+		return 0;
+	}
+
+	if (!panel || !panel->cur_mode || !panel->cur_mode->priv_info) {
+		OFP_ERR("Invalid panel params\n");
+		return -EINVAL;
+	}
+
+	if (!dsi_panel_initialized(panel)) {
+		OFP_ERR("should not update lhbm gamma if panel is not initialized\n");
+		return -EFAULT;
+	}
+
+	if (!panel->oplus_panel.gamma_ae174_compensation_support) {
+		OPLUS_DSI_INFO("panel gamma compensation isn't supported\n");
+		return rc;
+	}
+
+	if (!entering_lhbm) {
+		if (oplus_ofp_get_hbm_state()) {
+			OFP_ERR("should not update lhbm gamma if hbm state is false\n");
+			return 0;
+		}
+	}
+
+	for (i = 0; i < sizeof(lhbm_fpr_ratio) / sizeof(lhbm_fpr_ratio[0]); i++) {
+		if (bl_level >= lhbm_fpr_ratio[i].min &&
+			bl_level < lhbm_fpr_ratio[i].max) {
+			r_fpr_ratio = lhbm_fpr_ratio[i].r_ratio;
+			g_fpr_ratio = lhbm_fpr_ratio[i].g_ratio;
+			b_fpr_ratio = lhbm_fpr_ratio[i].b_ratio;
+			break;
+		}
+	}
+	r_regs = ae174_gamma->l_r_gamma * r_fpr_ratio * 4 / 10000U;
+	g_regs = ae174_gamma->l_g_gamma * g_fpr_ratio * 4 / 10000U;
+	b_regs = ae174_gamma->l_b_gamma * b_fpr_ratio * 4 / 10000U;
+
+	cmds = panel->cur_mode->priv_info->cmd_sets[DSI_CMD_LHBM_PRESSED_ICON_ON].cmds;
+	lcm_cmd_count = panel->cur_mode->priv_info->cmd_sets[DSI_CMD_LHBM_PRESSED_ICON_ON].count;
+
+	if (lcm_cmd_count > 6 || lcm_cmd_count < 1) {
+		OFP_ERR("lhbm gamma cmd invalid\n");
+		return rc;
+	}
+
+	for (i = 0; i < lcm_cmd_count; i++) {
+		lhbm_on_cmd[i].count = cmds[i].msg.tx_len;
+		lhbm_on_cmd[i].para_list = (u8 *)cmds[i].msg.tx_buf;
+	}
+	lhbm_on_cmd[4].para_list[1] = r_regs >> 8;
+	lhbm_on_cmd[4].para_list[2] = r_regs & 0xFF;
+	lhbm_on_cmd[4].para_list[3] = g_regs >> 8;
+	lhbm_on_cmd[4].para_list[4] = g_regs & 0xFF;
+	lhbm_on_cmd[4].para_list[5] = b_regs >> 8;
+	lhbm_on_cmd[4].para_list[6] = b_regs & 0xFF;
+	OFP_INFO("l_r_gamma %d l_g_gamma %d l_b_gamma %d, r_regs=[%02X %02X] g_regs=[%02X %02X] b_regs=[%02X %02X]  bl_level %d \n",
+		ae174_gamma->l_r_gamma,  ae174_gamma->l_g_gamma,  ae174_gamma->l_b_gamma,
+		lhbm_on_cmd[4].para_list[1], lhbm_on_cmd[4].para_list[2], lhbm_on_cmd[4].para_list[3],
+		lhbm_on_cmd[4].para_list[4], lhbm_on_cmd[4].para_list[5], lhbm_on_cmd[4].para_list[6], bl_level);
+
+	OFP_DEBUG("end\n");
+
+	return rc;
+}
+
 int oplus_ofp_send_hbm_state_event(unsigned int hbm_state)
 {
 	OFP_DEBUG("start\n");
@@ -2018,6 +2106,10 @@ static int oplus_ofp_set_panel_hbm(void *sde_connector, bool hbm_en)
 			rc = oplus_ofp_lhbm_dbv_vdc_update(display->panel, oplus_last_backlight, true);
 			if (rc) {
 				OFP_ERR("[%s] failed to update vdc cmds, rc=%d\n", display->name, rc);
+			}
+			rc = oplus_ofp_lhbm_ae174_pressed_gamma_update(display->panel, oplus_last_backlight, false);
+			if (rc) {
+				OFP_ERR("[%s] failed to update gamma cmds, rc=%d\n", display->name, rc);
 			}
 			rc = oplus_ofp_display_cmd_set(display, DSI_CMD_LHBM_PRESSED_ICON_ON);
 			if (rc) {
@@ -2931,7 +3023,7 @@ bool oplus_ofp_backlight_filter(void *dsi_panel, unsigned int bl_level)
 	} else if (oplus_ofp_get_aod_state()) {
 		OFP_INFO("aod state is true, filter backlight %u setting\n", bl_level);
 		need_filter_backlight = true;
-	} else if (!oplus_ofp_get_aod_state() && (hbm_enable & OPLUS_OFP_PROPERTY_AOD_LAYER) && bl_level
+	} else if (!oplus_ofp_get_aod_state() && (!p_oplus_ofp_params->aod_layer_disappeard_bl_ready) && bl_level
 				&& !((p_oplus_ofp_params->longrui_aod_config & OPLUS_OFP_A_MIRROR_TO_THE_END_AOD_CONFIG)
 					&& (p_oplus_ofp_params->longrui_aod_mode & OPLUS_OFP_A_MIRROR_TO_THE_END_AOD_MODE)
 					&& !p_oplus_ofp_params->doze_active)
@@ -3864,6 +3956,11 @@ int oplus_ofp_aod_off_backlight_recovery(void *sde_encoder_virt)
 	hbm_enable = sde_connector_get_property(c_conn->base.state, CONNECTOR_PROP_HBM_ENABLE);
 	new_aod_layer_status = hbm_enable & OPLUS_OFP_PROPERTY_AOD_LAYER;
 	OFP_DEBUG("hbm_enable:%llu,new_aod_layer_status:%d\n", hbm_enable, new_aod_layer_status);
+	if (last_aod_layer_status && !new_aod_layer_status) {
+		p_oplus_ofp_params->aod_layer_disappeard_bl_ready = 1;
+	} else if (!last_aod_layer_status && new_aod_layer_status) {
+		p_oplus_ofp_params->aod_layer_disappeard_bl_ready = 0;
+	}
 
 	if (last_aod_layer_status && !new_aod_layer_status) {
 		OFP_INFO("recovery backlight level = %d after aod layer disappear\n", display->panel->bl_config.bl_level);
@@ -4167,6 +4264,7 @@ ssize_t oplus_ofp_set_hbm_attr(struct kobject *obj,
 
 	if (oplus_ofp_local_hbm_is_enabled()) {
 		if (p_oplus_ofp_params->hbm_mode) {
+			oplus_ofp_lhbm_ae174_pressed_gamma_update(display->panel, oplus_last_backlight, true);
 			rc = oplus_ofp_display_cmd_set(display, DSI_CMD_LHBM_PRESSED_ICON_ON);
 			if (rc) {
 				OFP_ERR("[%s] failed to send DSI_CMD_LHBM_PRESSED_ICON_ON cmds, rc=%d\n", display->name, rc);

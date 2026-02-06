@@ -9,8 +9,9 @@ def define_oplus_local_modules():
 
     if bazel_support_platform == "qcom" :
         zram_opt_ko_deps = ["//soc-repo:{}/drivers/block/zram/zram".format(kernel_build_variant),"//vendor/oplus/kernel/cpu:oplus_bsp_sched_assist",":oplus_bsp_mm_osvelte"]
+        hybridswap_zram_ko_deps = []
     else :
-        zram_opt_ko_deps = ["//kernel_device_modules-6.12/drivers/misc/mediatek/mtk_zram:mtk_zram","//vendor/oplus/kernel/cpu:oplus_bsp_sched_assist",":oplus_bsp_mm_osvelte"]
+        zram_opt_ko_deps = ["//vendor/oplus/kernel/mm:oplus_bsp_hybridswap_zram","//vendor/oplus/kernel/cpu:oplus_bsp_sched_assist",":oplus_bsp_mm_osvelte"]
 
 #    define_oplus_ddk_module(
 #        name = "oplus_bsp_memleak_detect_simple",
@@ -22,47 +23,6 @@ def define_oplus_local_modules():
 #        includes = ["."],
 #        )
 #
-#   define_oplus_ddk_module(
-#       name = "oplus_bsp_hybridswap_zram",
-#       conditional_srcs = {
-#           "CONFIG_CONT_PTE_HUGEPAGE": {
-#               True: ["hybridswap_zram/hybridswap/hybridswapd_chp.c"],
-#           }
-#       },
-#
-#       srcs = native.glob([
-#           "**/*.h",
-#           "hybridswap_zram/zcomp.c",
-#           "hybridswap_zram/zram_drv.c",
-#           "hybridswap_zram/hybridswap/hybridmain.c",
-#           "hybridswap_zram/hybridswap/hybridswapd.c",
-#           "hybridswap_zram/hybridswap/hybridswap.c",
-#       ]),
-#       ko_deps = [
-#           "//vendor/oplus/kernel/mm:oplus_bsp_zsmalloc",
-#       ],
-#       includes = ["."],
-#       local_defines = ["CONFIG_HYBRIDSWAP","CONFIG_HYBRIDSWAP_SWAPD","CONFIG_HYBRIDSWAP_CORE","CONFIG_CRYPTO_LZ4K"],
-#       conditional_defines = {
-#            "qcom":  ["CONFIG_QCOM_PANEL_EVENT_NOTIFIER"],
-#            "mtk":  ["CONFIG_OPLUS_MTK_DRM_GKI_NOTIFY"],
-#       },
-#   )
-
-#    define_oplus_ddk_module(
-#        name = "oplus_bsp_zsmalloc",
-#        conditional_srcs = {
-#            "CONFIG_CONT_PTE_HUGEPAGE": {
-#                True: ["thp_zsmalloc/thp_zsmalloc.c"],
-#            }
-#        },
-#
-#        srcs = native.glob([
-#            "**/*.h",
-#            "thp_zsmalloc/zsmalloc.c",
-#        ]),
-#        includes = ["."],
-#    )
 
     define_oplus_ddk_module(
         name = "oplus_bsp_sigkill_diagnosis",

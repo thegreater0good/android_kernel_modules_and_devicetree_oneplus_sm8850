@@ -10,7 +10,6 @@
 
 #include "task_boost/heavy_task_boost.h"
 
-#define CRITICAL_TASK_NUM 2  // 0: unitymain 1: unitygfxdevicew
 #define CPU_NUM 8
 #define CRITICAL_TASK_STATUS_NUM 2  // 0: not running, 1: running
 #define SLIDE_WINDOW_SIZE 10
@@ -18,8 +17,6 @@
 static bool ct_enable = false;
 static int target_fps = 0;
 static u64 std_frame_length;
-
-static char critical_task[CRITICAL_TASK_NUM][100] = {"UnityMain", "UnityGfxDevice"};
 
 static struct hrtimer critical_task_long_stage_hrtimer;
 static struct hrtimer critical_task_cancel_boost_hrtimer;
@@ -65,7 +62,6 @@ static atomic_t critical_task_running_status[CRITICAL_TASK_NUM] = {ATOMIC_INIT(C
 
 extern inline void systrace_c_printk(const char *msg, unsigned long val);
 extern inline void systrace_c_printk_common(const char *msg, unsigned long val, int id);
-extern int get_critical_task_state(const char* name, pid_t pid);
 
 static DEFINE_MUTEX(chb_mutex);
 static DEFINE_RAW_SPINLOCK(chb_lock);
@@ -80,6 +76,48 @@ static struct kthread_worker sw_worker;
 static atomic_t is_boost = ATOMIC_INIT(false);
 
 static atomic_t ct_initialized_status = ATOMIC_INIT(false);
+
+static char critical_task[CRITICAL_TASK_NUM][100] = {"UnityMain", "UnityGfxDevice"};
+static pid_t game_tgid = -1;
+static pid_t critical_task_pids[CRITICAL_TASK_NUM] = {-1, -1};
+
+bool get_ctb_enable(void)
+{
+    bool ret = false;
+    unsigned long flags;
+
+    raw_spin_lock_irqsave(&chb_lock, flags);
+    ret = ct_enable;
+    raw_spin_unlock_irqrestore(&chb_lock, flags);
+    return ret;
+}
+
+void get_critical_task_name(char *unityMain_name, char *unityGfxDevice_name)
+{
+    strncpy(unityMain_name, critical_task[0], 100);
+    strncpy(unityGfxDevice_name, critical_task[1], 100);
+}
+
+void update_ctb_pids(pid_t tgid, pid_t unitymain_pid, pid_t unitygfxdevice_pid)
+{
+    unsigned long flags;
+
+    raw_spin_lock_irqsave(&chb_lock, flags);
+    if (!ct_enable) {
+        raw_spin_unlock_irqrestore(&chb_lock, flags);
+        return;
+    }
+    if (tgid > 0) {
+        game_tgid = tgid;
+    }
+    if (unitymain_pid > 0) {
+        critical_task_pids[0] = unitymain_pid;
+    }
+    if (unitygfxdevice_pid > 0) {
+        critical_task_pids[1] = unitygfxdevice_pid;
+    }
+    raw_spin_unlock_irqrestore(&chb_lock, flags);
+}
 
 static void set_all_cpu_mask(void)
 {
@@ -367,20 +405,17 @@ void ctb_notify_frame_produce(int buf_num)
 
 static void update_critical_task_time(struct task_struct *task, int i, bool is_prev_task)
 {
-    if (!task) {
-        return;
-    }
-    if (strncmp(task->comm, critical_task[i], strlen(critical_task[i])) != 0) {
-        return;
-    }
-    int state = -1;
-    pid_t pid = task->pid;
-    state = get_critical_task_state(critical_task[i], pid);
-    if (state == -1) {
-        return;
-    }
     u64 now = 0;
     unsigned long flags;
+
+    if (!task || strncmp(task->comm, critical_task[i], strlen(critical_task[i])) != 0) {
+        return;
+    }
+
+    if (task->pid != critical_task_pids[i] || task->tgid != game_tgid) {
+        return;
+    }
+
     now = ktime_get_ns();
     raw_spin_lock_irqsave(&chb_lock, flags);
     if (critical_task_end_time[i] != 0 && now >= critical_task_end_time[i]) {
@@ -583,6 +618,8 @@ static ssize_t critical_task_name_proc_write(struct file *file,
     mutex_lock(&chb_mutex);
 
     ret = sscanf(page, "%99s %99s", critical_task[0], critical_task[1]);
+    critical_task_pids[0] = -1;
+    critical_task_pids[1] = -1;
 
     if (ret != 2) {
         mutex_unlock(&chb_mutex);
@@ -601,8 +638,8 @@ static ssize_t critical_task_name_proc_read(struct file *file,
     int len;
 
     mutex_lock(&chb_mutex);
-    len = sprintf(page, "%s,%s\n",
-                    critical_task[0], critical_task[1]);
+    len = sprintf(page, "%s:%d,%s:%d\n",
+                    critical_task[0], critical_task_pids[0], critical_task[1], critical_task_pids[1]);
     mutex_unlock(&chb_mutex);
 
     return simple_read_from_buffer(buf, count, ppos, page, len);

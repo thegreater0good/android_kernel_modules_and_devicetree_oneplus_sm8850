@@ -37,7 +37,20 @@ static void io_metrics_unregister_tracepoints(void)
 
     return;
 }
+void io_metrics_reset(void)
+{
+    io_metrics_enabled = false;
+    smp_wmb(); // Ensure that the value of io_metrics_enabled has been updated
 
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(6, 6, 0))
+    f2fs_metrics_reset();
+#endif /* (LINUX_VERSION_CODE < KERNEL_VERSION(6, 6, 0)) */
+    block_metrics_reset();
+    ufs_metrics_reset();
+
+    smp_wmb(); // Ensure that the reset has been completed
+    io_metrics_enabled = true;
+}
 static int __init io_metrics_init(void)
 {
     io_metrics_print("Startting...\n");
@@ -46,7 +59,7 @@ static int __init io_metrics_init(void)
     f2fs_metrics_init();
 #endif /* (LINUX_VERSION_CODE < KERNEL_VERSION(6, 6, 0)) */
     block_metrics_init();
-    ufs_metrics_reset();
+    ufs_metrics_init();
     io_metrics_register_tracepoints();
     if (io_metrics_procfs_init())
     {

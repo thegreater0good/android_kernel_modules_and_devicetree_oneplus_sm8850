@@ -12,6 +12,9 @@
 #include "hmbird_II.h"
 #include "hmbird_II_freqgov.h"
 
+#define CREATE_TRACE_POINTS
+#include "trace_freqgov.h"
+
 #define DEFAULT_TARGET_LOAD 90
 #define DEFAULT_MUL_TARGET_LOAD "2;70:90:10"
 
@@ -122,15 +125,6 @@ static inline unsigned int mtl_target_load(struct hmbird_gov_policy *hg_policy, 
 	return tl;
 }
 
-static DEFINE_PER_CPU(int, prev_tl);
-void target_load_state_systrace_c(unsigned int cpu, unsigned int tl)
-{
-	if (per_cpu(prev_tl, cpu) != tl) {
-		hmbird_II_output_systrace("C|9999|Cpu%d_tl|%u\n", cpu, tl);
-		per_cpu(prev_tl, cpu) = tl;
-	}
-}
-
 static inline void hmbird_heavy_boost_systrace_c(int cpu, unsigned int next_f)
 {
 	hmbird_II_output_systrace("C|9999|Cpu%d_heavy_boost_freq|%u\n", cpu, next_f);
@@ -140,6 +134,16 @@ static inline void hmbird_top_task_boost_systrace_c(int cpu, unsigned int next_f
 {
 	hmbird_II_output_systrace("C|9999|Cpu%d_top_task_boost_freq|%u\n",
 			cpu, next_f);
+}
+
+unsigned int get_tl_from_perf(unsigned int cpu, u32 perf)
+{
+	struct hmbird_gov_cpu *hg_cpu = &per_cpu(hmbird_gov_cpu, cpu);
+	struct hmbird_gov_policy *hg_policy = hg_cpu->hg_policy;
+	if (!hg_policy)
+		return 0;
+
+	return mtl_target_load(hg_policy, perf);
 }
 
 static unsigned int get_next_freq(struct hmbird_gov_policy *hg_policy, u32 perf)
@@ -154,10 +158,46 @@ static unsigned int get_next_freq(struct hmbird_gov_policy *hg_policy, u32 perf)
 	next_f = mult_frac(freq, perf_tl, arch_scale_cpu_capacity(cpu));
 	scx_trace_printk("cluster[%d] max_freq[%d] perf[%d] cpu_cap[%lu] cluster_tl[%u] perf_tl[%u] next_f[%d]\n",
 			cpu, freq, perf, arch_scale_cpu_capacity(cpu), cluster_tl, perf_tl, next_f);
-	if (unlikely(hmbird_debug & HMBIRD_DEBUG_SYSTRACE))
-		target_load_state_systrace_c(policy->cpu, cluster_tl);
 
 	return next_f;
+}
+
+static void update_softlimit_systrace_c(struct hmbird_gov_policy *hg_policy)
+{
+	static long cached_val[MAX_NR_CLUSTER] = {0};
+	int cpu, cluster_id, last_cluster_id = -1;
+	long val;
+	/* tick. */
+	if (!hg_policy) {
+		for_each_possible_cpu(cpu) {
+			cluster_id = topology_cluster_id(cpu);
+			if (cluster_id >=  MAX_NR_CLUSTER || cluster_id < 0)
+				return;
+			if (last_cluster_id == cluster_id)
+				continue;
+			last_cluster_id = cluster_id;
+			val = cached_val[cluster_id];
+			hmbird_II_output_systrace("C|9999|clus[%d]_soft_limit|%ld\n", cluster_id, val);
+		}
+	} else {
+		struct cpufreq_policy *policy = hg_policy->policy;
+		int max_unit_k = hg_policy->tunables->soft_freq_max / 1000;
+		int min_unit_k = hg_policy->tunables->soft_freq_min / 1000;
+		cluster_id = topology_cluster_id(policy->cpu);
+		val = max_unit_k * 10000 + min_unit_k;
+		if (cluster_id >=  MAX_NR_CLUSTER || cluster_id < 0)
+			return;
+		cached_val[cluster_id] = val;
+		hmbird_II_output_systrace("C|9999|clus[%d]_soft_limit|%ld\n", cluster_id, val);
+	}
+}
+
+extern atomic_t __hb_ops_enabled;
+void update_softlimit_systrace_c_wrapper(void)
+{
+	if (!atomic_read(&__hb_ops_enabled))
+		return;
+	update_softlimit_systrace_c(NULL);
 }
 
 static unsigned int soft_freq_clamp(struct hmbird_gov_policy *hg_policy, unsigned int target_freq)
@@ -223,7 +263,7 @@ void hmbird_gov_update_soft_limit_cpufreq(struct hmbird_gov_policy *hg_policy)
 		cpufreq_driver_fast_switch(policy, next_f);
 	else
 		kthread_queue_work(&hg_policy->worker, &hg_policy->work);
-
+	trace_hmbird_freq_update(policy->cpu, HMBIRD_CPUFREQ_SOFTLIMIT_FLAG);
 unlock:
 	raw_spin_unlock_irqrestore(&hg_policy->update_lock, irq_flags);
 }
@@ -384,7 +424,8 @@ static ssize_t soft_freq_max_store(struct gov_attr_set *attr_set, const char *bu
 	if (tunables->apply_freq_immediately) {
 		hmbird_gov_update_soft_limit_cpufreq(hg_policy);
 	}
-
+	if (unlikely(hmbird_debug & HMBIRD_DEBUG_SYSTRACE))
+		update_softlimit_systrace_c(hg_policy);
 	return count;
 }
 
@@ -417,7 +458,8 @@ static ssize_t soft_freq_min_store(struct gov_attr_set *attr_set, const char *bu
 	if (tunables->apply_freq_immediately) {
 		hmbird_gov_update_soft_limit_cpufreq(hg_policy);
 	}
-
+	if (unlikely(hmbird_debug & HMBIRD_DEBUG_SYSTRACE))
+		update_softlimit_systrace_c(hg_policy);
 	return count;
 }
 
@@ -547,7 +589,7 @@ static void hmbirdgov_update_freq(struct update_util_data *cb, u64 time, unsigne
 	struct cpufreq_policy *policy = cpufreq_cpu_get_raw(hg_cpu->cpu);
 	struct rq *rq = cpu_rq(hg_cpu->cpu);
 	int cluster_id = topology_cluster_id(hg_cpu->cpu);
-	unsigned int flag = rq->scx.cpuperf_target & HMBIRD_CPUFREQ_PERF_FLAG_MASK;
+	unsigned int flag = flags & HMBIRD_CPUFREQ_PERF_FLAG_MASK;
 
 	if (flag == HMBIRD_CPUFREQ_WINDOW_ROLLOVER_FLAG || flag == HMBIRD_TASK_UCLAMP_UPDATE_FLAG
 						|| flag == HMBIRD_CPUFREQ_CAMREA_BOOST_FLAG) {
@@ -557,7 +599,7 @@ static void hmbirdgov_update_freq(struct update_util_data *cb, u64 time, unsigne
 				hmbird_heavy_boost_systrace_c(policy->cpu, 0);
 			goto clear;
 		}
-		hmbird_gov_update_cpufreq(policy, rq->scx.cpuperf_target | HMBIRD_CPUFREQ_PERF_FLAG_MASK);
+		hmbird_gov_update_cpufreq(policy, rq->scx.cpuperf_target);
 	}
 	if (flag == HMBIRD_CPUFREQ_HEAVY_BOOST_FLAG) {
 		if (!(heavy_boost_param.type & HMBIRD_CPUFREQ_HEAVY_BOOST_FLAG))
@@ -726,6 +768,8 @@ static int hmbird_gov_init(struct cpufreq_policy *policy)
 		goto fail;
 
 	policy->dvfs_possible_from_any_cpu = 1;
+	if (unlikely(hmbird_debug & HMBIRD_DEBUG_SYSTRACE))
+		update_softlimit_systrace_c(hg_policy);
 
 out:
 	mutex_unlock(&global_tunables_lock);
@@ -869,7 +913,7 @@ static void hmbird_gov_limits(struct cpufreq_policy *policy)
 		 */
 		final_freq = cpufreq_driver_resolve_freq(policy, freq);
 		cpufreq_driver_fast_switch(policy, final_freq);
-
+		trace_hmbird_freq_update(policy->cpu, HMBIRD_CPUFREQ_LIMIT_FLAG);
 		raw_spin_unlock_irqrestore(&hg_policy->update_lock, flags);
 	}
 }

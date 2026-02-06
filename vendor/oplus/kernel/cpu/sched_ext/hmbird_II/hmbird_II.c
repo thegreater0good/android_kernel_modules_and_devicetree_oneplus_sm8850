@@ -38,8 +38,37 @@ extern struct md_info_t *md_info;
 const int scx2hmbird_state[MAX_STATE] = {1, 4, 2, 0, 3, 5, 6, 7, 8, 9};
 
 static atomic_t hb_ops_enable_state_var = ATOMIC_INIT(SCX_OPS_DISABLED);
-static atomic_t __hb_ops_enabled = ATOMIC_INIT(0);
+atomic_t __hb_ops_enabled = ATOMIC_INIT(0);
 unsigned int hmbird_enable = 0;
+
+static unsigned long (*addr_kallsyms_lookup_name)(const char *name);
+LOOKUP_KERNEL_SYMBOL(kallsyms_lookup_name);
+
+struct sched_class *addr_stop_sched_class;
+struct sched_class *addr_dl_sched_class;
+struct sched_class *addr_rt_sched_class;
+struct sched_class *addr_fair_sched_class;
+struct sched_class *addr_ext_sched_class;
+
+int hmbird_prepare_and_check(void)
+{
+	lookup_kallsyms_lookup_name();
+	if (!addr_kallsyms_lookup_name)
+		return -1;
+	addr_stop_sched_class = (struct sched_class *)addr_kallsyms_lookup_name("stop_sched_class");
+	addr_dl_sched_class = (struct sched_class *)addr_kallsyms_lookup_name("dl_sched_class");
+	addr_rt_sched_class = (struct sched_class *)addr_kallsyms_lookup_name("rt_sched_class");
+	addr_fair_sched_class = (struct sched_class *)addr_kallsyms_lookup_name("fair_sched_class");
+	addr_ext_sched_class = (struct sched_class *)addr_kallsyms_lookup_name("ext_sched_class");
+
+	if (!addr_stop_sched_class
+		|| !addr_dl_sched_class || !addr_rt_sched_class
+		|| !addr_fair_sched_class || !addr_ext_sched_class) {
+		HMBIRD_ERR("lookup kernel symbols failed\n");
+		return -1;
+	}
+	return 0;
+}
 
 static inline bool hb_task_should_scx(int policy)
 {

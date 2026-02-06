@@ -3581,6 +3581,15 @@ static void wma_wake_event_log_reason(t_wma_handle *wma,
 		    snprintf(event_msg, sizeof(event_msg), "wakeup_mgmt=%s", wma_wow_wake_reason_str(wake_info->wake_reason));
 		    oplusLpmSendUevent(event_msg);
 		}
+		/* Special handling for LOCAL_DATA_UC_DROP wakeup */
+		//add for 9872014 connectivity power monitor
+		if (wake_info->wake_reason == WOW_REASON_LOCAL_DATA_UC_DROP) {
+		    wma_nofl_info("Reporting WOW wakeup to framework: LOCAL_DATA_UC_DROP (%d)",wake_info->wake_reason);
+		    char event_msg[256] = {'\0'};
+		    snprintf(event_msg, sizeof(event_msg), "wakeup_mgmt=%s", wma_wow_wake_reason_str(wake_info->wake_reason));
+		    /* Report to framework via uevent */
+		    oplusLpmSendUevent(event_msg);
+		}
 		#endif /* OPLUS_FEATURE_CONN_POWER_MONITOR */
 		wma_nofl_info("WLAN triggered wakeup: %s (%d), vdev: %d (%s) : (%s)",
 			      wma_wow_wake_reason_str(wake_info->wake_reason),

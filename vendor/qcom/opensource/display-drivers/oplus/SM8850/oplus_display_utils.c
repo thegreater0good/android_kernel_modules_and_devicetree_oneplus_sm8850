@@ -36,16 +36,52 @@
 #define GAMMA_COMPENSATION_PERCENTAGE2 87/100
 #define REG_SIZE 256
 #define OPLUS_DSI_CMD_PRINT_BUF_SIZE 1024
+#define GAMMA_COMPENSATION_REG_CNT 3
 #define GAMMA_COMPENSATION_READ_LENGTH 6
-#define GAMMA_COMPENSATION_READ_REG 0x81
+#define GAMMA_COMPENSATION_READ_REG_11 0x85
+#define GAMMA_COMPENSATION_READ_REG_8 0x84
+#define GAMMA_COMPENSATION_READ_REG_5 0x83
+#define GAMMA_COMPENSATION_READ_REG_3 0x82
+#define GAMMA_COMPENSATION_READ_REG_1 0x81
+#define GAMMA_COMPENSATION_READ_REG_0 0x80
 #define GAMMA_COMPENSATION_BAND_REG 0x99
-#define GAMMA_COMPENSATION_BAND_VALUE1 0x81
-#define GAMMA_COMPENSATION_BAND_VALUE2 0xB1
-#define GAMMA_COMPENSATION_BAND_VALUE3 0x8D
-#define GAMMA_COMPENSATION_BAND_VALUE4 0xBD
+#define GAMMA_COMPENSATION_BAND_120HZ 0x8B
+#define GAMMA_COMPENSATION_BAND_90HZ 0xBB
+#define GAMMA_COMPENSATION_120HZ_GREY8_R 97/100
+#define GAMMA_COMPENSATION_120HZ_GREY8_G 95/100
+#define GAMMA_COMPENSATION_120HZ_GREY8_B 99/100
+#define GAMMA_COMPENSATION_90HZ_GREY8_R 97/100
+#define GAMMA_COMPENSATION_90HZ_GREY8_G 92/100
+#define GAMMA_COMPENSATION_90HZ_GREY8_B 98/100
+#define GAMMA_COMPENSATION_120HZ_GREY5_R 94/100
+#define GAMMA_COMPENSATION_120HZ_GREY5_G 86/100
+#define GAMMA_COMPENSATION_120HZ_GREY5_B 97/100
+#define GAMMA_COMPENSATION_90HZ_GREY5_R 92/100
+#define GAMMA_COMPENSATION_90HZ_GREY5_G 81/100
+#define GAMMA_COMPENSATION_90HZ_GREY5_B 96/100
+#define GAMMA_COMPENSATION_120HZ_GREY3_R 90/100
+#define GAMMA_COMPENSATION_120HZ_GREY3_G 79/100
+#define GAMMA_COMPENSATION_120HZ_GREY3_B 96/100
+#define GAMMA_COMPENSATION_90HZ_GREY3_R 86/100
+#define GAMMA_COMPENSATION_90HZ_GREY3_G 72/100
+#define GAMMA_COMPENSATION_90HZ_GREY3_B 93/100
+#define GAMMA_COMPENSATION_120HZ_GREY1_R 85/100
+#define GAMMA_COMPENSATION_120HZ_GREY1_G 73/100
+#define GAMMA_COMPENSATION_120HZ_GREY1_B 95/100
+#define GAMMA_COMPENSATION_90HZ_GREY1_R 82/100
+#define GAMMA_COMPENSATION_90HZ_GREY1_G 65/100
+#define GAMMA_COMPENSATION_90HZ_GREY1_B 91/100
+#define GAMMA_COMPENSATION_120HZ_GREY0_R 27/100
+#define GAMMA_COMPENSATION_120HZ_GREY0_G 316/1000
+#define GAMMA_COMPENSATION_120HZ_GREY0_B 384/1000
+#define GAMMA_COMPENSATION_90HZ_GREY0_R 258/1000
+#define GAMMA_COMPENSATION_90HZ_GREY0_G 288/1000
+#define GAMMA_COMPENSATION_90HZ_GREY0_B 372/1000
 
 bool g_gamma_regs_read_done = false;
+bool g_gamma_inverse = false;
 EXPORT_SYMBOL(g_gamma_regs_read_done);
+EXPORT_SYMBOL(g_gamma_inverse);
 
 /* log level config */
 unsigned int oplus_display_log_level = OPLUS_LOG_LEVEL_INFO;
@@ -64,6 +100,16 @@ static struct dsi_display *current_display = NULL;
 bool refresh_rate_change = false;
 
 int oplus_sync_power_state = 0;
+
+struct panel_ae174_gamma ae174_gamma_regs = {
+	.l_r_gamma = 0xCA3,
+	.l_g_gamma = 0xB47,
+	.l_b_gamma = 0xD0A,
+	.a_r_gamma = 0xC9B,
+	.a_g_gamma = 0xB42,
+	.a_b_gamma = 0xD05,
+	.elvss_reg = 0x38,
+};
 
 struct dsi_display *get_main_display(void) {
 		return primary_display;
@@ -730,7 +776,8 @@ error:
 	return rc;
 }
 
-static int oplus_panel_gamma_compensation_read_reg(struct dsi_panel *panel, struct dsi_display_ctrl *m_ctrl, char *regs, u8 value)
+static int oplus_panel_gamma_compensation_read_reg(struct dsi_panel *panel, struct dsi_display_ctrl *m_ctrl,
+				char regs[][GAMMA_COMPENSATION_READ_LENGTH], u8 value)
 {
 	int rc = 0;
 	u32 cnt = 0;
@@ -753,8 +800,9 @@ static int oplus_panel_gamma_compensation_read_reg(struct dsi_panel *panel, stru
 		return rc;
 	}
 
-	rc = dsi_panel_read_panel_reg_unlock(m_ctrl, panel, GAMMA_COMPENSATION_READ_REG,
-			regs, GAMMA_COMPENSATION_READ_LENGTH);
+	memset(regs[0], 0, GAMMA_COMPENSATION_READ_LENGTH);
+	rc = dsi_panel_read_panel_reg_unlock(m_ctrl, panel, GAMMA_COMPENSATION_READ_REG_11,
+			regs[0], GAMMA_COMPENSATION_READ_LENGTH);
 	if (rc < 0) {
 		OPLUS_DSI_ERR("failed to read GAMMA_COMPENSATION_READ_REG rc=%d\n", rc);
 		return rc;
@@ -762,7 +810,35 @@ static int oplus_panel_gamma_compensation_read_reg(struct dsi_panel *panel, stru
 	cnt = 0;
 	memset(print_buf, 0, OPLUS_DSI_CMD_PRINT_BUF_SIZE);
 	for (index = 0; index < GAMMA_COMPENSATION_READ_LENGTH; index++) {
-		cnt += snprintf(print_buf + cnt, OPLUS_DSI_CMD_PRINT_BUF_SIZE - cnt, "%02X ", regs[index]);
+		cnt += snprintf(print_buf + cnt, OPLUS_DSI_CMD_PRINT_BUF_SIZE - cnt, "%02X ", regs[0][index]);
+	}
+	OPLUS_DSI_INFO("read regs0x%02X len=%d, buf=[%s]\n", value, GAMMA_COMPENSATION_READ_LENGTH, print_buf);
+
+	memset(regs[1], 0, GAMMA_COMPENSATION_READ_LENGTH);
+	rc = dsi_panel_read_panel_reg_unlock(m_ctrl, panel, GAMMA_COMPENSATION_READ_REG_5,
+			regs[1], GAMMA_COMPENSATION_READ_LENGTH);
+	if (rc < 0) {
+		OPLUS_DSI_ERR("failed to read GAMMA_COMPENSATION_READ_REG rc=%d\n", rc);
+		return rc;
+	}
+	cnt = 0;
+	memset(print_buf, 0, OPLUS_DSI_CMD_PRINT_BUF_SIZE);
+	for (index = 0; index < GAMMA_COMPENSATION_READ_LENGTH; index++) {
+		cnt += snprintf(print_buf + cnt, OPLUS_DSI_CMD_PRINT_BUF_SIZE - cnt, "%02X ", regs[1][index]);
+	}
+	OPLUS_DSI_INFO("read regs0x%02X len=%d, buf=[%s]\n", value, GAMMA_COMPENSATION_READ_LENGTH, print_buf);
+
+	memset(regs[2], 0, GAMMA_COMPENSATION_READ_LENGTH);
+	rc = dsi_panel_read_panel_reg_unlock(m_ctrl, panel, GAMMA_COMPENSATION_READ_REG_3,
+			regs[2], GAMMA_COMPENSATION_READ_LENGTH);
+	if (rc < 0) {
+		OPLUS_DSI_ERR("failed to read GAMMA_COMPENSATION_READ_REG rc=%d\n", rc);
+		return rc;
+	}
+	cnt = 0;
+	memset(print_buf, 0, OPLUS_DSI_CMD_PRINT_BUF_SIZE);
+	for (index = 0; index < GAMMA_COMPENSATION_READ_LENGTH; index++) {
+		cnt += snprintf(print_buf + cnt, OPLUS_DSI_CMD_PRINT_BUF_SIZE - cnt, "%02X ", regs[2][index]);
 	}
 	OPLUS_DSI_INFO("read regs0x%02X len=%d, buf=[%s]\n", value, GAMMA_COMPENSATION_READ_LENGTH, print_buf);
 
@@ -775,20 +851,37 @@ int oplus_display_panel_gamma_compensation(struct dsi_display *display)
 	u32 index = 0;
 	int rc = 0;
 	u32 cnt = 0;
-	u32 reg_tmp = 0;
 	struct dsi_display_mode *mode = NULL;
 	char print_buf[OPLUS_DSI_CMD_PRINT_BUF_SIZE] = {0};
 	struct dsi_display_ctrl *m_ctrl = NULL;
 	struct dsi_panel *panel = display->panel;
-	char regs1[GAMMA_COMPENSATION_READ_LENGTH] = {0};
-	char regs2[GAMMA_COMPENSATION_READ_LENGTH] = {0};
-	char regs3[GAMMA_COMPENSATION_READ_LENGTH] = {0};
-	char regs4[GAMMA_COMPENSATION_READ_LENGTH] = {0};
-	char regs1_last[GAMMA_COMPENSATION_READ_LENGTH] = {0};
-	char regs2_last[GAMMA_COMPENSATION_READ_LENGTH] = {0};
-	char regs3_last[GAMMA_COMPENSATION_READ_LENGTH] = {0};
-	char regs4_last[GAMMA_COMPENSATION_READ_LENGTH] = {0};
+	char regs120[GAMMA_COMPENSATION_REG_CNT][GAMMA_COMPENSATION_READ_LENGTH] = {0};
+	char regs90[GAMMA_COMPENSATION_REG_CNT][GAMMA_COMPENSATION_READ_LENGTH] = {0};
+	char regs120_last[GAMMA_COMPENSATION_REG_CNT][GAMMA_COMPENSATION_READ_LENGTH] = {0};
+	char regs90_last[GAMMA_COMPENSATION_REG_CNT][GAMMA_COMPENSATION_READ_LENGTH] = {0};
 	const char reg_base[GAMMA_COMPENSATION_READ_LENGTH] = {0};
+	u32 gamma120_grey11[3];
+	u32 gamma120_grey8[3];
+	u32 gamma120_grey5[3];
+	u32 gamma120_grey3[3];
+	u32 gamma120_grey1[3];
+	u32 gamma120_grey0[3];
+	u32 gamma90_grey11[3];
+	u32 gamma90_grey8[3];
+	u32 gamma90_grey5[3];
+	u32 gamma90_grey3[3];
+	u32 gamma90_grey1[3];
+	u32 gamma90_grey0[3];
+	char regs120_grey8[GAMMA_COMPENSATION_READ_LENGTH] = {0};
+	char regs120_grey5[GAMMA_COMPENSATION_READ_LENGTH] = {0};
+	char regs120_grey3[GAMMA_COMPENSATION_READ_LENGTH] = {0};
+	char regs120_grey1[GAMMA_COMPENSATION_READ_LENGTH] = {0};
+	char regs120_grey0[GAMMA_COMPENSATION_READ_LENGTH] = {0};
+	char regs90_grey8[GAMMA_COMPENSATION_READ_LENGTH] = {0};
+	char regs90_grey5[GAMMA_COMPENSATION_READ_LENGTH] = {0};
+	char regs90_grey3[GAMMA_COMPENSATION_READ_LENGTH] = {0};
+	char regs90_grey1[GAMMA_COMPENSATION_READ_LENGTH] = {0};
+	char regs90_grey0[GAMMA_COMPENSATION_READ_LENGTH] = {0};
 
 	if (!panel) {
 		OPLUS_DSI_ERR("panel is null\n");
@@ -820,45 +913,32 @@ int oplus_display_panel_gamma_compensation(struct dsi_display *display)
 	mutex_lock(&display->panel->panel_lock);
 	while(!g_gamma_regs_read_done && retry_count < GAMMA_COMPENSATION_READ_RETRY_MAX) {
 		OPLUS_DSI_INFO("read gamma compensation regs, retry_count=%d\n", retry_count);
-		memset(regs1, 0, GAMMA_COMPENSATION_READ_LENGTH);
-		memset(regs2, 0, GAMMA_COMPENSATION_READ_LENGTH);
-		memset(regs3, 0, GAMMA_COMPENSATION_READ_LENGTH);
-		memset(regs4, 0, GAMMA_COMPENSATION_READ_LENGTH);
 
-		rc = oplus_panel_gamma_compensation_read_reg(panel, m_ctrl, regs1, GAMMA_COMPENSATION_BAND_VALUE1);
+		rc = oplus_panel_gamma_compensation_read_reg(panel, m_ctrl, regs120, GAMMA_COMPENSATION_BAND_120HZ);
 		if (rc) {
-			OPLUS_DSI_ERR("panel read reg1 failed\n");
+			OPLUS_DSI_ERR("panel read regs120 failed\n");
 			retry_count++;
 			continue;
 		}
-		rc = oplus_panel_gamma_compensation_read_reg(panel, m_ctrl, regs2, GAMMA_COMPENSATION_BAND_VALUE2);
+		rc = oplus_panel_gamma_compensation_read_reg(panel, m_ctrl, regs90, GAMMA_COMPENSATION_BAND_90HZ);
 		if (rc) {
-			OPLUS_DSI_ERR("panel read reg1 failed\n");
+			OPLUS_DSI_ERR("panel read regs90 failed\n");
 			retry_count++;
 			continue;
 		}
-		rc = oplus_panel_gamma_compensation_read_reg(panel, m_ctrl, regs3, GAMMA_COMPENSATION_BAND_VALUE3);
-		if (rc) {
-			OPLUS_DSI_ERR("panel read reg1 failed\n");
-			retry_count++;
-			continue;
-		}
-		rc = oplus_panel_gamma_compensation_read_reg(panel, m_ctrl, regs4, GAMMA_COMPENSATION_BAND_VALUE4);
-		if (rc) {
-			OPLUS_DSI_ERR("panel read reg1 failed\n");
-			retry_count++;
-			continue;
-		}
-
-		if (!memcmp(regs1, reg_base, sizeof(reg_base)) || !memcmp(regs2, reg_base, sizeof(reg_base)) ||
-				!memcmp(regs3, reg_base, sizeof(reg_base)) || !memcmp(regs4, reg_base, sizeof(reg_base)) ||
-				memcmp(regs1, regs1_last, sizeof(regs1_last)) || memcmp(regs2, regs2_last, sizeof(regs2_last)) ||
-				memcmp(regs3, regs3_last, sizeof(regs1_last)) || memcmp(regs4, regs4_last, sizeof(regs2_last))) {
+		if (!memcmp(regs120[0], reg_base, sizeof(reg_base)) || !memcmp(regs90[0], reg_base, sizeof(reg_base)) ||
+			 memcmp(regs120[0], regs120_last[0], sizeof(regs120_last[0])) || memcmp(regs90[0], regs90_last[0], sizeof(regs90_last[0])) ||
+			 !memcmp(regs120[1], reg_base, sizeof(reg_base)) || !memcmp(regs90[1], reg_base, sizeof(reg_base)) ||
+			 memcmp(regs120[1], regs120_last[1], sizeof(regs120_last[1])) || memcmp(regs90[1], regs90_last[1], sizeof(regs90_last[1])) ||
+			 !memcmp(regs120[2], reg_base, sizeof(reg_base)) || !memcmp(regs90[2], reg_base, sizeof(reg_base)) ||
+			 memcmp(regs120[2], regs120_last[2], sizeof(regs120_last[2])) || memcmp(regs90[2], regs90_last[2], sizeof(regs90_last[2]))) {
 			OPLUS_DSI_WARN("gamma compensation regs is invalid, retry\n");
-			memcpy(regs1_last, regs1, GAMMA_COMPENSATION_READ_LENGTH);
-			memcpy(regs2_last, regs2, GAMMA_COMPENSATION_READ_LENGTH);
-			memcpy(regs3_last, regs3, GAMMA_COMPENSATION_READ_LENGTH);
-			memcpy(regs4_last, regs4, GAMMA_COMPENSATION_READ_LENGTH);
+			memcpy(regs120_last[0], regs120[0], GAMMA_COMPENSATION_READ_LENGTH);
+			memcpy(regs90_last[0], regs90[0], GAMMA_COMPENSATION_READ_LENGTH);
+			memcpy(regs120_last[1], regs120[1], GAMMA_COMPENSATION_READ_LENGTH);
+			memcpy(regs90_last[1], regs90[1], GAMMA_COMPENSATION_READ_LENGTH);
+			memcpy(regs120_last[2], regs120[2], GAMMA_COMPENSATION_READ_LENGTH);
+			memcpy(regs90_last[2], regs90[2], GAMMA_COMPENSATION_READ_LENGTH);
 			retry_count++;
 			continue;
 		}
@@ -880,95 +960,247 @@ int oplus_display_panel_gamma_compensation(struct dsi_display *display)
 	}
 
 	for (index = 0; index < (GAMMA_COMPENSATION_READ_LENGTH - 1); index = index+2) {
-		reg_tmp = regs1[index] << 8 | regs1[index+1];
-		regs1[index] = (reg_tmp*GAMMA_COMPENSATION_PERCENTAGE1) >> 8 & 0xFF;
-		regs1[index+1] = (reg_tmp*GAMMA_COMPENSATION_PERCENTAGE1) & 0xFF;
-
-		reg_tmp = regs2[index] << 8 | regs2[index+1];
-		regs2[index] = (reg_tmp*GAMMA_COMPENSATION_PERCENTAGE1) >> 8 & 0xFF;
-		regs2[index+1] = (reg_tmp*GAMMA_COMPENSATION_PERCENTAGE1) & 0xFF;
-
-		reg_tmp = regs3[index] << 8 | regs3[index+1];
-		regs3[index] = (reg_tmp*GAMMA_COMPENSATION_PERCENTAGE2) >> 8 & 0xFF;
-		regs3[index+1] = (reg_tmp*GAMMA_COMPENSATION_PERCENTAGE2) & 0xFF;
-
-		reg_tmp = regs4[index] << 8 | regs4[index+1];
-		regs4[index] = (reg_tmp*GAMMA_COMPENSATION_PERCENTAGE2) >> 8 & 0xFF;
-		regs4[index+1] = (reg_tmp*GAMMA_COMPENSATION_PERCENTAGE2) & 0xFF;
+		gamma120_grey11[index / 2] = regs120[0][index] << 8 | regs120[0][index+1];
+		gamma120_grey5[index / 2] = regs120[1][index] << 8 | regs120[1][index+1];
+		gamma120_grey3[index / 2] = regs120[2][index] << 8 | regs120[2][index+1];
+		gamma90_grey11[index / 2] = regs90[0][index] << 8 | regs90[0][index+1];
+		gamma90_grey5[index / 2] = regs90[1][index] << 8 | regs90[1][index+1];
+		gamma90_grey3[index / 2] = regs90[2][index] << 8 | regs90[2][index+1];
 	}
 
-	cnt = 0;
-	memset(print_buf, 0, OPLUS_DSI_CMD_PRINT_BUF_SIZE);
-	for (index = 0; index < GAMMA_COMPENSATION_READ_LENGTH; index++) {
-		cnt += snprintf(print_buf + cnt, OPLUS_DSI_CMD_PRINT_BUF_SIZE - cnt, "%02X ", regs1[index]);
-	}
-	OPLUS_DSI_INFO("compensation regs0x%02X len=%d, buf=[%s]\n", GAMMA_COMPENSATION_BAND_VALUE1,
-			GAMMA_COMPENSATION_READ_LENGTH, print_buf);
+	OPLUS_DSI_INFO("gamma120_grey11 = [%3d %3d %3d]", gamma120_grey11[0], gamma120_grey11[1], gamma120_grey11[2]);
+	OPLUS_DSI_INFO("gamma120_grey5 = [%3d %3d %3d]", gamma120_grey5[0], gamma120_grey5[1], gamma120_grey5[2]);
+	OPLUS_DSI_INFO("gamma120_grey3 = [%3d %3d %3d]", gamma120_grey3[0], gamma120_grey3[1], gamma120_grey3[2]);
+	OPLUS_DSI_INFO("gamma90_grey11 = [%3d %3d %3d]", gamma90_grey11[0], gamma90_grey11[1], gamma90_grey11[2]);
+	OPLUS_DSI_INFO("gamma90_grey5 = [%3d %3d %3d]", gamma90_grey5[0], gamma90_grey5[1], gamma90_grey5[2]);
+	OPLUS_DSI_INFO("gamma90_grey3 = [%3d %3d %3d]", gamma90_grey3[0], gamma90_grey3[1], gamma90_grey3[2]);
 
-	cnt = 0;
-	memset(print_buf, 0, OPLUS_DSI_CMD_PRINT_BUF_SIZE);
-	for (index = 0; index < GAMMA_COMPENSATION_READ_LENGTH; index++) {
-		cnt += snprintf(print_buf + cnt, OPLUS_DSI_CMD_PRINT_BUF_SIZE - cnt, "%02X ", regs2[index]);
-	}
-	OPLUS_DSI_INFO("compensation regs0x%02X len=%d, buf=[%s]\n", GAMMA_COMPENSATION_BAND_VALUE2,
-			GAMMA_COMPENSATION_READ_LENGTH, print_buf);
+	if ((gamma120_grey5[0] < gamma120_grey3[0]) || (gamma120_grey5[1] < gamma120_grey3[1]) || (gamma120_grey5[2] < gamma120_grey3[2]) ||
+		(gamma90_grey5[0] < gamma90_grey3[0]) || (gamma90_grey5[1] < gamma90_grey3[1]) || (gamma90_grey5[2] < gamma90_grey3[2])) {
+		g_gamma_inverse = true;
+		gamma120_grey8[0] = gamma120_grey11[0] * GAMMA_COMPENSATION_120HZ_GREY8_R;
+		gamma120_grey8[1] = gamma120_grey11[1] * GAMMA_COMPENSATION_120HZ_GREY8_G;
+		gamma120_grey8[2] = gamma120_grey11[2] * GAMMA_COMPENSATION_120HZ_GREY8_B;
+		gamma120_grey5[0] = gamma120_grey11[0] * GAMMA_COMPENSATION_120HZ_GREY5_R;
+		gamma120_grey5[1] = gamma120_grey11[1] * GAMMA_COMPENSATION_120HZ_GREY5_G;
+		gamma120_grey5[2] = gamma120_grey11[2] * GAMMA_COMPENSATION_120HZ_GREY5_B;
+		gamma120_grey3[0] = gamma120_grey11[0] * GAMMA_COMPENSATION_120HZ_GREY3_R;
+		gamma120_grey3[1] = gamma120_grey11[1] * GAMMA_COMPENSATION_120HZ_GREY3_G;
+		gamma120_grey3[2] = gamma120_grey11[2] * GAMMA_COMPENSATION_120HZ_GREY3_B;
+		gamma120_grey1[0] = gamma120_grey11[0] * GAMMA_COMPENSATION_120HZ_GREY1_R;
+		gamma120_grey1[1] = gamma120_grey11[1] * GAMMA_COMPENSATION_120HZ_GREY1_G;
+		gamma120_grey1[2] = gamma120_grey11[2] * GAMMA_COMPENSATION_120HZ_GREY1_B;
+		gamma120_grey0[0] = gamma120_grey11[0] * GAMMA_COMPENSATION_120HZ_GREY0_R;
+		gamma120_grey0[1] = gamma120_grey11[1] * GAMMA_COMPENSATION_120HZ_GREY0_G;
+		gamma120_grey0[2] = gamma120_grey11[2] * GAMMA_COMPENSATION_120HZ_GREY0_B;
+		gamma90_grey8[0] = gamma90_grey11[0] * GAMMA_COMPENSATION_90HZ_GREY8_R;
+		gamma90_grey8[1] = gamma90_grey11[1] * GAMMA_COMPENSATION_90HZ_GREY8_G;
+		gamma90_grey8[2] = gamma90_grey11[2] * GAMMA_COMPENSATION_90HZ_GREY8_B;
+		gamma90_grey5[0] = gamma90_grey11[0] * GAMMA_COMPENSATION_90HZ_GREY5_R;
+		gamma90_grey5[1] = gamma90_grey11[1] * GAMMA_COMPENSATION_90HZ_GREY5_G;
+		gamma90_grey5[2] = gamma90_grey11[2] * GAMMA_COMPENSATION_90HZ_GREY5_B;
+		gamma90_grey3[0] = gamma90_grey11[0] * GAMMA_COMPENSATION_90HZ_GREY3_R;
+		gamma90_grey3[1] = gamma90_grey11[1] * GAMMA_COMPENSATION_90HZ_GREY3_G;
+		gamma90_grey3[2] = gamma90_grey11[2] * GAMMA_COMPENSATION_90HZ_GREY3_B;
+		gamma90_grey1[0] = gamma90_grey11[0] * GAMMA_COMPENSATION_90HZ_GREY1_R;
+		gamma90_grey1[1] = gamma90_grey11[1] * GAMMA_COMPENSATION_90HZ_GREY1_G;
+		gamma90_grey1[2] = gamma90_grey11[2] * GAMMA_COMPENSATION_90HZ_GREY1_B;
+		gamma90_grey0[0] = gamma90_grey11[0] * GAMMA_COMPENSATION_90HZ_GREY0_R;
+		gamma90_grey0[1] = gamma90_grey11[1] * GAMMA_COMPENSATION_90HZ_GREY0_G;
+		gamma90_grey0[2] = gamma90_grey11[2] * GAMMA_COMPENSATION_90HZ_GREY0_B;
+		OPLUS_DSI_INFO("g_gamma_inverse = %d", g_gamma_inverse);
+		OPLUS_DSI_INFO("gamma120_grey8 = [%3d %3d %3d]", gamma120_grey8[0], gamma120_grey8[1], gamma120_grey8[2]);
+		OPLUS_DSI_INFO("gamma120_grey5 = [%3d %3d %3d]", gamma120_grey5[0], gamma120_grey5[1], gamma120_grey5[2]);
+		OPLUS_DSI_INFO("gamma120_grey3 = [%3d %3d %3d]", gamma120_grey3[0], gamma120_grey3[1], gamma120_grey3[2]);
+		OPLUS_DSI_INFO("gamma120_grey1 = [%3d %3d %3d]", gamma120_grey1[0], gamma120_grey1[1], gamma120_grey1[2]);
+		OPLUS_DSI_INFO("gamma120_grey0 = [%3d %3d %3d]", gamma120_grey0[0], gamma120_grey0[1], gamma120_grey0[2]);
+		OPLUS_DSI_INFO("gamma90_grey8 = [%3d %3d %3d]", gamma90_grey8[0], gamma90_grey8[1], gamma90_grey8[2]);
+		OPLUS_DSI_INFO("gamma90_grey5 = [%3d %3d %3d]", gamma90_grey5[0], gamma90_grey5[1], gamma90_grey5[2]);
+		OPLUS_DSI_INFO("gamma90_grey3 = [%3d %3d %3d]", gamma90_grey3[0], gamma90_grey3[1], gamma90_grey3[2]);
+		OPLUS_DSI_INFO("gamma90_grey1 = [%3d %3d %3d]", gamma90_grey1[0], gamma90_grey1[1], gamma90_grey1[2]);
+		OPLUS_DSI_INFO("gamma90_grey0 = [%3d %3d %3d]", gamma90_grey0[0], gamma90_grey0[1], gamma90_grey0[2]);
 
-	cnt = 0;
-	memset(print_buf, 0, OPLUS_DSI_CMD_PRINT_BUF_SIZE);
-	for (index = 0; index < GAMMA_COMPENSATION_READ_LENGTH; index++) {
-		cnt += snprintf(print_buf + cnt, OPLUS_DSI_CMD_PRINT_BUF_SIZE - cnt, "%02X ", regs3[index]);
-	}
-	OPLUS_DSI_INFO("compensation regs0x%02X len=%d, buf=[%s]\n", GAMMA_COMPENSATION_BAND_VALUE3,
-			GAMMA_COMPENSATION_READ_LENGTH, print_buf);
-
-	cnt = 0;
-	memset(print_buf, 0, OPLUS_DSI_CMD_PRINT_BUF_SIZE);
-	for (index = 0; index < GAMMA_COMPENSATION_READ_LENGTH; index++) {
-		cnt += snprintf(print_buf + cnt, OPLUS_DSI_CMD_PRINT_BUF_SIZE - cnt, "%02X ", regs4[index]);
-	}
-	OPLUS_DSI_INFO("compensation regs0x%02X len=%d, buf=[%s]\n", GAMMA_COMPENSATION_BAND_VALUE4,
-			GAMMA_COMPENSATION_READ_LENGTH, print_buf);
-
-	mutex_lock(&display->display_lock);
-	mutex_lock(&display->panel->panel_lock);
-	for (index = 0; index < display->panel->num_display_modes; index++) {
-		mode = &display->modes[index];
-		if (!mode) {
-			OPLUS_DSI_INFO("mode is null\n");
-			continue;
+		for (index = 0; index < (GAMMA_COMPENSATION_READ_LENGTH - 1); index = index+2) {
+			regs120_grey8[index] = gamma120_grey8[index / 2] >> 8 & 0xFF;
+			regs120_grey8[index + 1] = gamma120_grey8[index / 2] & 0xFF;
+			regs120_grey5[index] = gamma120_grey5[index / 2] >> 8 & 0xFF;
+			regs120_grey5[index + 1] = gamma120_grey5[index / 2] & 0xFF;
+			regs120_grey3[index] = gamma120_grey3[index / 2] >> 8 & 0xFF;
+			regs120_grey3[index + 1] = gamma120_grey3[index / 2] & 0xFF;
+			regs120_grey1[index] = gamma120_grey1[index / 2] >> 8 & 0xFF;
+			regs120_grey1[index + 1] = gamma120_grey1[index / 2] & 0xFF;
+			regs120_grey0[index] = gamma120_grey0[index / 2] >> 8 & 0xFF;
+			regs120_grey0[index + 1] = gamma120_grey0[index / 2] & 0xFF;
+			regs90_grey8[index] = gamma90_grey8[index / 2] >> 8 & 0xFF;
+			regs90_grey8[index + 1] = gamma90_grey8[index / 2] & 0xFF;
+			regs90_grey5[index] = gamma90_grey5[index / 2] >> 8 & 0xFF;
+			regs90_grey5[index + 1] = gamma90_grey5[index / 2] & 0xFF;
+			regs90_grey3[index] = gamma90_grey3[index / 2] >> 8 & 0xFF;
+			regs90_grey3[index + 1] = gamma90_grey3[index / 2] & 0xFF;
+			regs90_grey1[index] = gamma90_grey1[index / 2] >> 8 & 0xFF;
+			regs90_grey1[index + 1] = gamma90_grey1[index / 2] & 0xFF;
+			regs90_grey0[index] = gamma90_grey0[index / 2] >> 8 & 0xFF;
+			regs90_grey0[index + 1] = gamma90_grey0[index / 2] & 0xFF;
 		}
-		rc = oplus_panel_cmd_reg_replace_specific_row(panel, mode, DSI_CMD_GAMMA_COMPENSATION, regs1,
-			GAMMA_COMPENSATION_READ_LENGTH, 5/* rows of cmd */);
-		if (rc) {
-			OPLUS_DSI_ERR("DSI_CMD_GAMMA_COMPENSATION reg1 replace failed\n");
-			g_gamma_regs_read_done = false;
-			return -EFAULT;
+
+		cnt = 0;
+		memset(print_buf, 0, OPLUS_DSI_CMD_PRINT_BUF_SIZE);
+		for (index = 0; index < GAMMA_COMPENSATION_READ_LENGTH; index++) {
+			cnt += snprintf(print_buf + cnt, OPLUS_DSI_CMD_PRINT_BUF_SIZE - cnt, "%02X ", regs120_grey8[index]);
 		}
-		rc = oplus_panel_cmd_reg_replace_specific_row(panel, mode, DSI_CMD_GAMMA_COMPENSATION, regs2,
-				GAMMA_COMPENSATION_READ_LENGTH, 7/* rows of cmd */);
-		if (rc) {
-			OPLUS_DSI_ERR("DSI_CMD_GAMMA_COMPENSATION reg2 replace failed\n");
-			g_gamma_regs_read_done = false;
-			return -EFAULT;
+		OPLUS_DSI_INFO("compensation regs0x%02X len=%d, buf=[%s]\n", GAMMA_COMPENSATION_READ_REG_8,
+				GAMMA_COMPENSATION_READ_LENGTH, print_buf);
+
+		cnt = 0;
+		memset(print_buf, 0, OPLUS_DSI_CMD_PRINT_BUF_SIZE);
+		for (index = 0; index < GAMMA_COMPENSATION_READ_LENGTH; index++) {
+			cnt += snprintf(print_buf + cnt, OPLUS_DSI_CMD_PRINT_BUF_SIZE - cnt, "%02X ", regs120_grey5[index]);
 		}
-		rc = oplus_panel_cmd_reg_replace_specific_row(panel, mode, DSI_CMD_GAMMA_COMPENSATION, regs3,
-				GAMMA_COMPENSATION_READ_LENGTH, 9/* rows of cmd */);
-		if (rc) {
-			OPLUS_DSI_ERR("DSI_CMD_GAMMA_COMPENSATION reg3 replace failed\n");
-			g_gamma_regs_read_done = false;
-			return -EFAULT;
+		OPLUS_DSI_INFO("compensation regs0x%02X len=%d, buf=[%s]\n", GAMMA_COMPENSATION_READ_REG_5,
+				GAMMA_COMPENSATION_READ_LENGTH, print_buf);
+		cnt = 0;
+		memset(print_buf, 0, OPLUS_DSI_CMD_PRINT_BUF_SIZE);
+		for (index = 0; index < GAMMA_COMPENSATION_READ_LENGTH; index++) {
+			cnt += snprintf(print_buf + cnt, OPLUS_DSI_CMD_PRINT_BUF_SIZE - cnt, "%02X ", regs120_grey3[index]);
 		}
-		rc = oplus_panel_cmd_reg_replace_specific_row(panel, mode, DSI_CMD_GAMMA_COMPENSATION, regs4,
-				GAMMA_COMPENSATION_READ_LENGTH, 11/* rows of cmd */);
-		if (rc) {
-			OPLUS_DSI_ERR("DSI_CMD_GAMMA_COMPENSATION reg4 replace failed\n");
-			g_gamma_regs_read_done = false;
-			return -EFAULT;
+		OPLUS_DSI_INFO("compensation regs0x%02X len=%d, buf=[%s]\n", GAMMA_COMPENSATION_READ_REG_3,
+				GAMMA_COMPENSATION_READ_LENGTH, print_buf);
+
+		cnt = 0;
+		memset(print_buf, 0, OPLUS_DSI_CMD_PRINT_BUF_SIZE);
+		for (index = 0; index < GAMMA_COMPENSATION_READ_LENGTH; index++) {
+			cnt += snprintf(print_buf + cnt, OPLUS_DSI_CMD_PRINT_BUF_SIZE - cnt, "%02X ", regs120_grey1[index]);
 		}
-		OPLUS_DSI_INFO("display mode%d had completed gamma compensation\n", index);
+		OPLUS_DSI_INFO("compensation regs0x%02X len=%d, buf=[%s]\n", GAMMA_COMPENSATION_READ_REG_1,
+				GAMMA_COMPENSATION_READ_LENGTH, print_buf);
+		cnt = 0;
+		memset(print_buf, 0, OPLUS_DSI_CMD_PRINT_BUF_SIZE);
+		for (index = 0; index < GAMMA_COMPENSATION_READ_LENGTH; index++) {
+			cnt += snprintf(print_buf + cnt, OPLUS_DSI_CMD_PRINT_BUF_SIZE - cnt, "%02X ", regs120_grey0[index]);
+		}
+		OPLUS_DSI_INFO("compensation regs0x%02X len=%d, buf=[%s]\n", GAMMA_COMPENSATION_READ_REG_0,
+				GAMMA_COMPENSATION_READ_LENGTH, print_buf);
+		cnt = 0;
+		memset(print_buf, 0, OPLUS_DSI_CMD_PRINT_BUF_SIZE);
+		for (index = 0; index < GAMMA_COMPENSATION_READ_LENGTH; index++) {
+			cnt += snprintf(print_buf + cnt, OPLUS_DSI_CMD_PRINT_BUF_SIZE - cnt, "%02X ", regs90_grey8[index]);
+		}
+		OPLUS_DSI_INFO("compensation regs0x%02X len=%d, buf=[%s]\n", GAMMA_COMPENSATION_READ_REG_8,
+				GAMMA_COMPENSATION_READ_LENGTH, print_buf);
+
+		cnt = 0;
+		memset(print_buf, 0, OPLUS_DSI_CMD_PRINT_BUF_SIZE);
+		for (index = 0; index < GAMMA_COMPENSATION_READ_LENGTH; index++) {
+			cnt += snprintf(print_buf + cnt, OPLUS_DSI_CMD_PRINT_BUF_SIZE - cnt, "%02X ", regs90_grey5[index]);
+		}
+		OPLUS_DSI_INFO("compensation regs0x%02X len=%d, buf=[%s]\n", GAMMA_COMPENSATION_READ_REG_5,
+				GAMMA_COMPENSATION_READ_LENGTH, print_buf);
+		cnt = 0;
+		memset(print_buf, 0, OPLUS_DSI_CMD_PRINT_BUF_SIZE);
+		for (index = 0; index < GAMMA_COMPENSATION_READ_LENGTH; index++) {
+			cnt += snprintf(print_buf + cnt, OPLUS_DSI_CMD_PRINT_BUF_SIZE - cnt, "%02X ", regs90_grey3[index]);
+		}
+		OPLUS_DSI_INFO("compensation regs0x%02X len=%d, buf=[%s]\n", GAMMA_COMPENSATION_READ_REG_3,
+				GAMMA_COMPENSATION_READ_LENGTH, print_buf);
+
+		cnt = 0;
+		memset(print_buf, 0, OPLUS_DSI_CMD_PRINT_BUF_SIZE);
+		for (index = 0; index < GAMMA_COMPENSATION_READ_LENGTH; index++) {
+			cnt += snprintf(print_buf + cnt, OPLUS_DSI_CMD_PRINT_BUF_SIZE - cnt, "%02X ", regs90_grey1[index]);
+		}
+		OPLUS_DSI_INFO("compensation regs0x%02X len=%d, buf=[%s]\n", GAMMA_COMPENSATION_READ_REG_1,
+				GAMMA_COMPENSATION_READ_LENGTH, print_buf);
+		cnt = 0;
+		memset(print_buf, 0, OPLUS_DSI_CMD_PRINT_BUF_SIZE);
+		for (index = 0; index < GAMMA_COMPENSATION_READ_LENGTH; index++) {
+			cnt += snprintf(print_buf + cnt, OPLUS_DSI_CMD_PRINT_BUF_SIZE - cnt, "%02X ", regs90_grey0[index]);
+		}
+		OPLUS_DSI_INFO("compensation regs0x%02X len=%d, buf=[%s]\n", GAMMA_COMPENSATION_READ_REG_0,
+				GAMMA_COMPENSATION_READ_LENGTH, print_buf);
+
+		mutex_lock(&display->display_lock);
+		mutex_lock(&display->panel->panel_lock);
+		for (index = 0; index < display->panel->num_display_modes; index++) {
+			mode = &display->modes[index];
+			if (!mode) {
+				OPLUS_DSI_INFO("mode is null\n");
+				continue;
+			}
+			rc = oplus_panel_cmd_reg_replace_specific_row(panel, mode, DSI_CMD_GAMMA_COMPENSATION, regs120_grey8,
+				GAMMA_COMPENSATION_READ_LENGTH, 3);
+			if (rc) {
+				OPLUS_DSI_ERR("DSI_CMD_GAMMA_COMPENSATION gamma120_grey8 replace failed\n");
+				g_gamma_regs_read_done = false;
+				return -EFAULT;
+			}
+			rc = oplus_panel_cmd_reg_replace_specific_row(panel, mode, DSI_CMD_GAMMA_COMPENSATION, regs120_grey5,
+					GAMMA_COMPENSATION_READ_LENGTH, 4);
+			if (rc) {
+				OPLUS_DSI_ERR("DSI_CMD_GAMMA_COMPENSATION gamma120_grey5 replace failed\n");
+				g_gamma_regs_read_done = false;
+				return -EFAULT;
+			}
+		    rc = oplus_panel_cmd_reg_replace_specific_row(panel, mode, DSI_CMD_GAMMA_COMPENSATION, regs120_grey3,
+				GAMMA_COMPENSATION_READ_LENGTH, 5);
+			if (rc) {
+				OPLUS_DSI_ERR("DSI_CMD_GAMMA_COMPENSATION gamma120_grey3 replace failed\n");
+				g_gamma_regs_read_done = false;
+				return -EFAULT;
+			}
+			rc = oplus_panel_cmd_reg_replace_specific_row(panel, mode, DSI_CMD_GAMMA_COMPENSATION, regs120_grey1,
+					GAMMA_COMPENSATION_READ_LENGTH, 6);
+			if (rc) {
+				OPLUS_DSI_ERR("DSI_CMD_GAMMA_COMPENSATION gamma120_grey1 replace failed\n");
+				g_gamma_regs_read_done = false;
+				return -EFAULT;
+			}
+		    rc = oplus_panel_cmd_reg_replace_specific_row(panel, mode, DSI_CMD_GAMMA_COMPENSATION, regs120_grey0,
+					GAMMA_COMPENSATION_READ_LENGTH, 7);
+			if (rc) {
+				OPLUS_DSI_ERR("DSI_CMD_GAMMA_COMPENSATION gamma120_grey0 replace failed\n");
+				g_gamma_regs_read_done = false;
+				return -EFAULT;
+			}
+			rc = oplus_panel_cmd_reg_replace_specific_row(panel, mode, DSI_CMD_GAMMA_COMPENSATION, regs90_grey8,
+				GAMMA_COMPENSATION_READ_LENGTH, 10);
+			if (rc) {
+				OPLUS_DSI_ERR("DSI_CMD_GAMMA_COMPENSATION gamma120_grey8 replace failed\n");
+				g_gamma_regs_read_done = false;
+				return -EFAULT;
+			}
+			rc = oplus_panel_cmd_reg_replace_specific_row(panel, mode, DSI_CMD_GAMMA_COMPENSATION, regs90_grey5,
+					GAMMA_COMPENSATION_READ_LENGTH, 11);
+			if (rc) {
+				OPLUS_DSI_ERR("DSI_CMD_GAMMA_COMPENSATION gamma120_grey5 replace failed\n");
+				g_gamma_regs_read_done = false;
+				return -EFAULT;
+			}
+			rc = oplus_panel_cmd_reg_replace_specific_row(panel, mode, DSI_CMD_GAMMA_COMPENSATION, regs90_grey3,
+				GAMMA_COMPENSATION_READ_LENGTH, 12);
+			if (rc) {
+				OPLUS_DSI_ERR("DSI_CMD_GAMMA_COMPENSATION gamma120_grey3 replace failed\n");
+				g_gamma_regs_read_done = false;
+				return -EFAULT;
+			}
+			rc = oplus_panel_cmd_reg_replace_specific_row(panel, mode, DSI_CMD_GAMMA_COMPENSATION, regs90_grey1,
+					GAMMA_COMPENSATION_READ_LENGTH, 13);
+			if (rc) {
+				OPLUS_DSI_ERR("DSI_CMD_GAMMA_COMPENSATION gamma120_grey1 replace failed\n");
+				g_gamma_regs_read_done = false;
+				return -EFAULT;
+			}
+			rc = oplus_panel_cmd_reg_replace_specific_row(panel, mode, DSI_CMD_GAMMA_COMPENSATION, regs90_grey0,
+					GAMMA_COMPENSATION_READ_LENGTH, 14);
+			if (rc) {
+				OPLUS_DSI_ERR("DSI_CMD_GAMMA_COMPENSATION gamma120_grey0 replace failed\n");
+				g_gamma_regs_read_done = false;
+				return -EFAULT;
+			}
+			OPLUS_DSI_INFO("display mode%d had completed gamma compensation\n", index);
+		}
+		mutex_unlock(&display->panel->panel_lock);
+		mutex_unlock(&display->display_lock);
 	}
-	mutex_unlock(&display->panel->panel_lock);
-	mutex_unlock(&display->display_lock);
 
 	return rc;
 }
@@ -1713,6 +1945,11 @@ void oplus_panel_frame_delay(struct dsi_panel *panel, u32 per_frame_us, u32 fram
 		return;
 	}
 
+	/* add 700us to vsync width(first half of frame time) to
+	 * 1. avoid command sent in the middle of TE cycle
+	 * 2. compensate the TE shift period */
+	frame_delay_us += 700;
+
 	last_te_timestamp = panel->oplus_panel.te_timestamp;
 	duration = ktime_to_us(ktime_sub(ktime_get(), last_te_timestamp));
 	if(duration > 3 * per_frame_us || sde_enc->rc_state == 4) {
@@ -1840,6 +2077,10 @@ void oplus_panel_timing_switch_lut_set(struct dsi_panel *panel)
 			rc = dsi_panel_tx_cmd_set(panel, DSI_CMD_SET_FPS_SWITCH_144_TO_90, false);
 		} else if (last_refresh_rate == 90 && refresh_rate == 144) {
 			rc = dsi_panel_tx_cmd_set(panel, DSI_CMD_SET_FPS_SWITCH_90_TO_144, false);
+		} else if (last_refresh_rate == 165 && refresh_rate == 120) {
+			rc = dsi_panel_tx_cmd_set(panel, DSI_CMD_SET_FPS_SWITCH_165_TO_120, false);
+		} else if (last_refresh_rate == 165 && refresh_rate == 60) {
+			rc = dsi_panel_tx_cmd_set(panel, DSI_CMD_SET_FPS_SWITCH_165_TO_60, false);
 		} else {
 			OPLUS_DSI_INFO("no associated LUT SEL\n");
 		}
@@ -1864,4 +2105,165 @@ void oplus_panel_timing_switch_wait_te(struct dsi_panel *panel)
 	}
 
 	return;
+}
+
+struct panel_ae174_gamma* get_panel_ae174_gamma(void)
+{
+	return &ae174_gamma_regs;
+}
+
+int oplus_panel_ae174_gamma_compensation(void *dsi_display)
+{
+	int rc = 0;
+	static unsigned int retry_count = 0;
+	static bool gamma_regs_read_done = false;
+	unsigned char l_r_reg[2] = {0};
+	unsigned char l_g_reg[2] = {0};
+	unsigned char l_b_reg[2] = {0};
+	unsigned char a_r_reg[2] = {0};
+	unsigned char a_g_reg[2] = {0};
+	unsigned char a_b_reg[2] = {0};
+	unsigned char elvss_reg = 0;
+	unsigned int read_l_r_gamma = 0;
+	unsigned int read_l_g_gamma = 0;
+	unsigned int read_l_b_gamma = 0;
+	unsigned int read_a_r_gamma = 0;
+	unsigned int read_a_g_gamma = 0;
+	unsigned int read_a_b_gamma = 0;
+	struct dsi_display *display = dsi_display;
+	struct dsi_panel *panel = display->panel;
+	struct panel_ae174_gamma *ae174_gamma = get_panel_ae174_gamma();
+
+	if (!panel) {
+		OPLUS_DSI_ERR("panel is null\n");
+		return  -EINVAL;
+	}
+
+	if (!panel->oplus_panel.gamma_ae174_compensation_support) {
+		OPLUS_DSI_INFO("panel gamma compensation isn't supported\n");
+		return rc;
+	}
+
+	if (display->panel->power_mode != SDE_MODE_DPMS_ON) {
+		OPLUS_DSI_ERR("display panel in off status\n");
+		return -EINVAL;
+	}
+	if (!display->panel->panel_initialized) {
+		OPLUS_DSI_ERR("panel initialized = false\n");
+		return -EINVAL;
+	}
+
+	while (!gamma_regs_read_done && (retry_count < 10)) {
+		rc = dsi_panel_tx_cmd_set(panel, DSI_CMD_GAMMA_COMPENSATION, false);
+		if (rc) {
+			OPLUS_DSI_ERR("[%s] failed to send DSI_CMD_GAMMA_COMPENSATION cmds, rc=%d\n", display->name, rc);
+			return rc;
+		}
+		rc = dsi_panel_tx_cmd_set(panel, DSI_CMD_GAMMA_COMPENSATION_PAGE0, false);
+		if (rc) {
+			OPLUS_DSI_ERR("[%s] failed to send DSI_CMD_GAMMA_COMPENSATION_PAGE0 cmds, rc=%d\n", display->name, rc);
+			return rc;
+		}
+		rc = dsi_display_read_panel_reg(display, 0xB2, l_r_reg, 2);
+		if (rc) {
+			OPLUS_DSI_ERR("failed to read panel reg 0xB2, rc=%d\n", rc);
+			return rc;
+		}
+		rc = dsi_panel_tx_cmd_set(panel, DSI_CMD_GAMMA_COMPENSATION_PAGE0, false);
+		if (rc) {
+			OPLUS_DSI_ERR("[%s] failed to send DSI_CMD_GAMMA_COMPENSATION_PAGE0 cmds, rc=%d\n", display->name, rc);
+			return rc;
+		}
+		rc = dsi_display_read_panel_reg(display, 0xB5, l_g_reg, 2);
+		if (rc) {
+			OPLUS_DSI_ERR("failed to read panel reg 0xB5, rc=%d\n", rc);
+			return rc;
+		}
+		rc = dsi_panel_tx_cmd_set(panel, DSI_CMD_GAMMA_COMPENSATION_PAGE0, false);
+		if (rc) {
+			OPLUS_DSI_ERR("[%s] failed to send DSI_CMD_GAMMA_COMPENSATION_PAGE0 cmds, rc=%d\n", display->name, rc);
+			return rc;
+		}
+		rc = dsi_display_read_panel_reg(display, 0xB8, l_b_reg, 2);
+		if (rc) {
+			OPLUS_DSI_ERR("failed to read panel reg 0xB8, rc=%d\n", rc);
+			return rc;
+		}
+
+		/* read apl gamma */
+		rc = dsi_panel_tx_cmd_set(panel, DSI_CMD_GAMMA_COMPENSATION, false);
+		if (rc) {
+			OPLUS_DSI_ERR("[%s] failed to send DSI_CMD_GAMMA_COMPENSATION cmds, rc=%d\n", display->name, rc);
+			return rc;
+		}
+		rc = dsi_panel_tx_cmd_set(panel, DSI_CMD_GAMMA_COMPENSATION_PAGE1, false);
+		if (rc) {
+			OPLUS_DSI_ERR("[%s] failed to send DSI_CMD_GAMMA_COMPENSATION_PAGE1 cmds, rc=%d\n", display->name, rc);
+			return rc;
+		}
+		rc = dsi_display_read_panel_reg(display, 0xB2, a_r_reg, 2);
+		if (rc) {
+			OPLUS_DSI_ERR("failed to read panel reg 0xB2, rc=%d\n", rc);
+			return rc;
+		}
+		rc = dsi_panel_tx_cmd_set(panel, DSI_CMD_GAMMA_COMPENSATION_PAGE1, false);
+		if (rc) {
+			OPLUS_DSI_ERR("[%s] failed to send DSI_CMD_GAMMA_COMPENSATION_PAGE1 cmds, rc=%d\n", display->name, rc);
+			return rc;
+		}
+		rc = dsi_display_read_panel_reg(display, 0xB5, a_g_reg, 2);
+		if (rc) {
+			OPLUS_DSI_ERR("failed to read panel reg 0xB5, rc=%d\n", rc);
+			return rc;
+		}
+		rc = dsi_panel_tx_cmd_set(panel, DSI_CMD_GAMMA_COMPENSATION_PAGE1, false);
+		if (rc) {
+			OPLUS_DSI_ERR("[%s] failed to send DSI_CMD_GAMMA_COMPENSATION_PAGE1 cmds, rc=%d\n", display->name, rc);
+			return rc;
+		}
+		rc = dsi_display_read_panel_reg(display, 0xB8, a_b_reg, 2);
+		if (rc) {
+			OPLUS_DSI_ERR("failed to read panel reg 0xB8, rc=%d\n", rc);
+			return rc;
+		}
+		rc = dsi_panel_tx_cmd_set(panel, DSI_CMD_GAMMA_COMPENSATION_PAGE2, false);
+		if (rc) {
+			OPLUS_DSI_ERR("[%s] failed to send DSI_CMD_GAMMA_COMPENSATION_PAGE2 cmds, rc=%d\n", display->name, rc);
+			return rc;
+		}
+		rc = dsi_display_read_panel_reg(display, 0xB5, (unsigned char*)&elvss_reg, 1);
+		if (rc) {
+			OPLUS_DSI_ERR("failed to read panel reg 0xB5, rc=%d\n", rc);
+			return rc;
+		}
+
+		OPLUS_DSI_INFO("l_r_reg=[%02X %02X] l_g_reg=[%02X %02X] l_b_reg=[%02X %02X]\n",
+			l_r_reg[0], l_r_reg[1], l_g_reg[0], l_g_reg[1], l_b_reg[0], l_b_reg[1]);
+		OPLUS_DSI_INFO("a_r_reg=[%02X %02X] a_g_reg=[%02X %02X] a_b_reg=[%02X %02X] elvss_reg=[%02X]\n",
+			a_r_reg[0], a_r_reg[1], a_g_reg[0], a_g_reg[1], a_b_reg[0], a_b_reg[1], elvss_reg);
+		read_l_r_gamma = ((l_r_reg[0] & 0xFF) << 8) | l_r_reg[1];
+		read_l_g_gamma = ((l_g_reg[0] & 0xFF) << 8) | l_g_reg[1];
+		read_l_b_gamma = ((l_b_reg[0] & 0xFF) << 8) | l_b_reg[1];
+		read_a_r_gamma = ((a_r_reg[0] & 0xFF) << 8) | a_r_reg[1];
+		read_a_g_gamma = ((a_g_reg[0] & 0xFF) << 8) | a_g_reg[1];
+		read_a_b_gamma = ((a_b_reg[0] & 0xFF) << 8) | a_b_reg[1];
+		if ((read_l_r_gamma > 0 && read_l_r_gamma < 0xFFF) &&
+			(read_l_g_gamma > 0 && read_l_g_gamma < 0xFFF) &&
+			(read_l_b_gamma > 0 && read_l_b_gamma < 0xFFF)) {
+			ae174_gamma->l_r_gamma = read_l_r_gamma;
+			ae174_gamma->l_g_gamma = read_l_g_gamma;
+			ae174_gamma->l_b_gamma = read_l_b_gamma;
+			ae174_gamma->a_r_gamma = read_a_r_gamma;
+			ae174_gamma->a_g_gamma = read_a_g_gamma;
+			ae174_gamma->a_b_gamma = read_a_b_gamma;
+			ae174_gamma->elvss_reg = elvss_reg;
+			gamma_regs_read_done = true;
+			OPLUS_DSI_INFO("update panel ae174 gamma successfully\n");
+			break;
+		}
+		OPLUS_DSI_ERR("gamma compensation regs is invalid, retry=%d\n", retry_count);
+		retry_count++;
+	}
+
+	return rc;
 }

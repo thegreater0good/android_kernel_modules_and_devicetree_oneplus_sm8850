@@ -119,6 +119,7 @@ void android_vh_tick_nohz_idle_stop_tick_handler(void *unused, void *data)
 #define HM_SYSTRACE_INTERVAL_JIFF	msecs_to_jiffies(3000)
 extern void hmbird_state_systrace_c(void);
 extern void gov_switch_state_systrace_c(void);
+extern void update_softlimit_systrace_c_wrapper(void);
 static volatile unsigned long next_systrace_jiff;
 static volatile u64 in_output;
 
@@ -135,6 +136,7 @@ static void scheduler_tick_handler(void *unused, struct rq *rq)
 			goto skip_systrace;
 		}
 		hmbird_state_systrace_c();
+		update_softlimit_systrace_c_wrapper();
 		gov_switch_state_systrace_c();
 		next_systrace_jiff = jiffies + HM_SYSTRACE_INTERVAL_JIFF;
 		in_output = 0;

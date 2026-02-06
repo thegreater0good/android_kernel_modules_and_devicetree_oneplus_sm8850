@@ -297,10 +297,20 @@ config OPLUS_SEC_IC_SC5891
 	help
 	  Say Y here to declare encryption ic sc5891 support
 
+config OPLUS_DUAL_CELLS_PROTECTION
+	bool "enable dual cells protection support"
+	help
+	  Say Y here to declare dual cells protection support
+
 config OPLUS_MT6835_CHARGER
         bool "MTK6835 support"
         help
           Say Y here to declare MTK6835 support
+
+config OPLUS_MT6769_CHARGER
+        bool "MTK6769 support"
+        help
+          Say Y here to declare MTK6769 support
 
 config OPLUS_SY6974B_CHARGER
 	bool "SY6974B support"

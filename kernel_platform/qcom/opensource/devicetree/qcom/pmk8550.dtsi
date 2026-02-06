@@ -12,7 +12,7 @@
 #include <dt-bindings/iio/qcom,spmi-adc5-gen3-pm8550b.h>
 #include <dt-bindings/iio/qcom,spmi-adc5-gen3-pm8550vx.h>
 
-qcom,pmk8550@0 {
+pmk8550: qcom,pmk8550@0 {
 	compatible = "qcom,spmi-pmic";
 	reg = <0 SPMI_USID>;
 	#address-cells = <1>;

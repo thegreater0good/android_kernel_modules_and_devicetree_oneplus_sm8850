@@ -70,6 +70,8 @@ module_param(v_adjust, int, 0644);
 #define MAG_CVR_TAG         "[magnetic_cover]"
 #define MAG_CVR_DEBUG_TAG   "[magnetic_cover debug]"
 
+#define INPUT_BUF_SIZE       32
+
 // #define MAGCVR_LOG_DEBUG_ON 1
 bool debug_enable = 0;
 

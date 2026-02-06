@@ -745,9 +745,9 @@ static void create_devinfo_ufs(void *data, async_cookie_t c)
 	static char status_name[17] = "ufsplus_status";
 	int ret = 0;
 	struct ufs_hba *hba = NULL;
+	hba = shost_priv(sdev->host);
 #ifndef CONFIG_OPLUS_QCOM_UFS_DRIVER
 	struct ufs_mtk_host *host;
-	hba = shost_priv(sdev->host);
 	host = ufshcd_get_variant(hba);
 	if (host->host_id == 1) {
 		strncpy(version_name, "ufs_version_1", 13);
@@ -842,7 +842,8 @@ int ufs_ioctl_monitor(struct scsi_device *dev, void __user *buf_user)
 	cmdlen = COMMAND_SIZE(opcode);
 	if (((VENDOR_SPECIFIC_CDB == opcode) && (0 == strncmp(dev->vendor, "SAMSUNG ", 8)))
 	         || ((READ_BUFFER == opcode) && (0 == strncmp(dev->vendor, "XBSTOR ", 7)))
-                 || ((0xD0 == opcode) && (0 == strncmp(dev->vendor, "SKhynix", 7)))) {
+	         || ((READ_BUFFER == opcode) && (0 == strncmp(dev->vendor, "YMTC ", 5)))
+	         || ((0xD0 == opcode) && (0 == strncmp(dev->vendor, "SKhynix", 7)))) {
 		cmdlen = 16;
 	}
 
@@ -1255,7 +1256,7 @@ static void ufs_oplus_ioctl_init(struct scsi_device *sdev) {
 }
 
 void ufs_oplus_init_sdev(struct scsi_device *sdev) {
-	if ((0 == strncmp(sdev->vendor, "XBSTOR ", 7) && scsi_is_wlun(sdev->lun)))
+	if (scsi_is_wlun(sdev->lun))
             return;
 
 	if (atomic_inc_return(&ufs_init_done) == 1) {
@@ -1274,11 +1275,21 @@ static void iostack_monitor_work(struct work_struct *work)
 							struct ufs_qcom_host,
 							iostack_work);
 	struct ufs_hba *hba = host->hba;
-	unsigned int hba_irqs = 0;
+	struct msi_desc *desc;
+	unsigned int irqs = 0;
 	unsigned int self_block = hba->host->host_self_blocked;
 
-	hba_irqs = kstat_irqs_usr(hba->irq);
-	pr_err("iostack:hba_irqs = %d, self-block = %d\n", hba_irqs, self_block);
+	if (hba->mcq_enabled) {
+		msi_lock_descs(hba->dev);
+		msi_for_each_desc(desc, hba->dev, MSI_DESC_ALL) {
+			irqs += kstat_irqs_usr(desc->irq);
+		}
+		msi_unlock_descs(hba->dev);
+	} else {
+		irqs = kstat_irqs_usr(hba->irq);
+	}
+
+	pr_err("iostack:irqs = %d, self-block = %d\n", irqs, self_block);
 	schedule_delayed_work(&host->iostack_work, IOSTACK_WORK_DELAY);
 }
 #else
@@ -1288,11 +1299,18 @@ static void iostack_monitor_work(struct work_struct *work)
 							struct ufs_mtk_host,
 							iostack_work);
 	struct ufs_hba *hba = host->hba;
+	unsigned int mcq_irqs = 0;
 	unsigned int hba_irqs = 0;
 	unsigned int self_block = hba->host->host_self_blocked;
+	u32 i;
 
 	hba_irqs = kstat_irqs_usr(hba->irq);
-	pr_err("iostack:hba_irqs = %d, self-block = %d\n", hba_irqs, self_block);
+	if (hba->mcq_enabled) {
+		for (i = 0; i < host->mcq_nr_intr; i++) {
+			mcq_irqs += kstat_irqs_usr(host->mcq_intr_info[i].irq);
+		}
+	}
+	pr_err("iostack:hba_irqs = %d, mcq_irqs = %d, self-block = %d\n", hba_irqs, mcq_irqs, self_block);
 	schedule_delayed_work(&host->iostack_work, IOSTACK_WORK_DELAY);
 }
 #endif

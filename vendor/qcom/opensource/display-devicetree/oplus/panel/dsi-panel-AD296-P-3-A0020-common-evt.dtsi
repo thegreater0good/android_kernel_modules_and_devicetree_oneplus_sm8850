@@ -245,6 +245,33 @@
                     39 00 00 40 00 00 1F C4 AF E9 E9 86 86 FF 86 86 86 86 FF 86 86 86 86 FF 86 86 86 86 FF 86 86 86 86 FF 86 86 86 86
                     39 00 00 00 00 00 04 FF 5A A5 00
                 ];
+                oplus,dsi-panel-gamma-compensation-page0-command = [
+                    39 00 00 40 00 00 04 FF 5A A5 2F
+                    15 00 00 40 00 00 02 99 00
+                    39 00 00 00 00 00 04 FF 5A A5 00
+                ];
+                oplus,dsi-panel-gamma-compensation-page1-command = [
+                    39 00 00 40 00 00 04 FF 5A A5 2F
+                    15 00 00 00 00 00 02 99 00
+                ];
+                oplus,dsi-panel-gamma-compensation-command = [
+                    39 00 00 40 00 00 04 FF 5A A5 2F
+                    15 00 00 40 00 00 02 99 8B
+                    39 00 00 40 00 00 07 84 00 00 00 00 00 00
+                    39 00 00 40 00 00 07 83 00 00 00 00 00 00
+                    39 00 00 40 00 00 07 82 00 00 00 00 00 00
+                    39 00 00 40 00 00 07 81 00 00 00 00 00 00
+                    39 00 00 40 00 00 07 80 00 00 00 00 00 00
+                    15 00 00 40 00 00 02 99 00
+                    15 00 00 40 00 00 02 99 BB
+                    39 00 00 40 00 00 07 84 00 00 00 00 00 00
+                    39 00 00 40 00 00 07 83 00 00 00 00 00 00
+                    39 00 00 40 00 00 07 82 00 00 00 00 00 00
+                    39 00 00 40 00 00 07 81 00 00 00 00 00 00
+                    39 00 00 40 00 00 07 80 00 00 00 00 00 00
+                    15 00 00 40 00 00 02 99 00
+                    39 00 00 00 00 00 04 FF 5A A5 00
+                ];
                 qcom,mdss-dsi-lp1-command-state = "dsi_hs_sync2_mode";
                 qcom,mdss-dsi-nolp-command-state = "dsi_hs_sync2_mode";
                 qcom,mdss-dsi-aod-off-pwm-mode2-command-state = "dsi_hs_sync2_mode";
@@ -268,6 +295,9 @@
                 oplus,mdss-dsi-dynamic-float-te-command-state = "dsi_hs_mode";
                 oplus,mdss-dsi-dynamic-float-dc-te-command-state = "dsi_hs_mode";
                 oplus,mdss-dsi-dynamic-float-default-te-command-state = "dsi_hs_mode";
+                oplus,dsi-panel-gamma-compensation-page0-command-state = "dsi_hs_mode";
+                oplus,dsi-panel-gamma-compensation-page1-command-state = "dsi_hs_mode";
+                oplus,dsi-panel-gamma-compensation-command-state = "dsi_hs_mode";
 
                 /* SPR CONFIG */
                 qcom,src-chroma-format = <1>;

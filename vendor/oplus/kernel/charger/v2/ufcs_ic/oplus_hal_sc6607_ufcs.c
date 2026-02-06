@@ -309,11 +309,6 @@ static int sc6607_ufcs_read_msg(struct ufcs_dev *ufcs, unsigned char *buf, int l
 		chg_err("can't read rx buf, rc=%d\n", rc);
 		return rc;
 	}
-	rc = sc6607_write_byte(chip, SC6607_ADDR_UFCS_CTRL1, 0x10);
-	if (rc < 0) {
-		chg_err("can't write SC6607_ADDR_UFCS_CTRL1, rc=%d\n", rc);
-		return rc;
-	}
 	return (int)rx_buf_len;
 }
 
@@ -669,6 +664,9 @@ static struct regmap_config sc6607_regmap_config = {
 	.volatile_reg = sc6607_is_volatile_reg,
 };
 
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 3, 0))
+static int sc6607_ufcs_probe(struct i2c_client *client)
+#else
 static int sc6607_ufcs_probe(struct i2c_client *client, const struct i2c_device_id *id)
 {
 	struct sc6607 *chip;

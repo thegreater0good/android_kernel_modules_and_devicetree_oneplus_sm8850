@@ -52,6 +52,16 @@ typedef struct panel_serial_info {
 	uint64_t reserved[2];
 } PANEL_SERIAL_INFO;
 
+struct panel_ae174_gamma {
+	unsigned int l_r_gamma;
+	unsigned int l_g_gamma;
+	unsigned int l_b_gamma;
+	unsigned int a_r_gamma;
+	unsigned int a_g_gamma;
+	unsigned int a_b_gamma;
+	unsigned char elvss_reg;
+};
+
 int oplus_display_register_client(struct notifier_block *nb);
 int oplus_display_unregister_client(struct notifier_block *nb);
 bool oplus_is_correct_display(enum oplus_display_support_list lcd_name);
@@ -123,4 +133,7 @@ int oplus_display_panel_gamma_compensation(struct dsi_display *display);
 int oplus_dsi_panel_parse_lut(struct dsi_panel *panel);
 void oplus_panel_timing_switch_lut_set(struct dsi_panel *panel);
 void oplus_panel_timing_switch_wait_te(struct dsi_panel *panel);
+struct panel_ae174_gamma* get_panel_ae174_gamma(void);
+int oplus_panel_ae174_gamma_compensation(void *dsi_display);
+
 #endif /* _OPLUS_DISPLAY_UTILS_H_ */

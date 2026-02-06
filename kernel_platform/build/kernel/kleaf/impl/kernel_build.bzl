@@ -1167,20 +1167,6 @@ def _create_kbuild_mixed_tree_legacy(ctx):
     kbuild_mixed_tree = ctx.actions.declare_directory("{}_kbuild_mixed_tree".format(ctx.label.name))
     returned_inputs = depset([kbuild_mixed_tree])
     base_kernel_files = base_kernel_utils.get_base_kernel(ctx)[KernelBuildMixedTreeInfo].files
-    gki_restore_cmd = ""
-    gki_path = ctx.configuration.default_shell_env.get("PREBUILT_BOOTIMAGE_PATH", "")
-    prebuilt_bootimage = ctx.configuration.default_shell_env.get("OPLUS_USE_PREBUILT_BOOTIMAGE", "")
-    target_build_variant = ctx.configuration.default_shell_env.get("TARGET_BUILD_VARIANT", "")
-    if prebuilt_bootimage not in ("ogki", "no" , "oki") and target_build_variant != "userdebug":
-        gki_restore_cmd = """
-            input="$(realpath ${KBUILD_MIXED_TREE})"
-            root_dir=$(echo "$input" | sed -n 's|\\(.*source/vnd\\).*|\\1|p')
-            vmlinux_src=$(realpath "${root_dir}/${gki_path}")
-            vmlinux_dest="${KBUILD_MIXED_TREE}/vmlinux"
-            if [ -f ${vmlinux_src} ]; then
-                cp -f "$(readlink -m "$vmlinux_src")" "$vmlinux_dest"
-            fi
-        """
     kbuild_mixed_tree_command = hermetic_tools.setup + """
         # Restore GKI artifacts for mixed build
         export KBUILD_MIXED_TREE=$(realpath {kbuild_mixed_tree})
@@ -1189,14 +1175,10 @@ def _create_kbuild_mixed_tree_legacy(ctx):
         for base_kernel_file in {base_kernel_files}; do
             cp -a -t ${{KBUILD_MIXED_TREE}} $(readlink -m ${{base_kernel_file}})
         done
-        gki_path={gki_path}
-        {gki_restore_cmd}
     """.format(
         # This to_list() is acceptable because GKI's outs/module_outs is a small list
         base_kernel_files = " ".join([file.path for file in base_kernel_files.to_list()]),
         kbuild_mixed_tree = kbuild_mixed_tree.path,
-        gki_restore_cmd = gki_restore_cmd,
-        gki_path = gki_path,
     )
     debug.print_scripts(ctx, kbuild_mixed_tree_command, what = "kbuild_mixed_tree")
     ctx.actions.run_shell(

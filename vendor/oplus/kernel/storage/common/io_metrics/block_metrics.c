@@ -2,6 +2,13 @@
 #include "procfs.h"
 #include "block_metrics.h"
 #include <trace/events/block.h>
+#include <linux/string.h>
+#include <linux/seq_file.h>
+#include <linux/spinlock.h>
+#include <linux/ktime.h>
+#include <linux/moduleparam.h>
+#include <linux/blkdev.h>
+#include <linux/cache.h>
 
 #define BLK_METRICS_LAT(op, size, layer)   \
     atomic64_t blk_metrics_lat_##op##_##size##_##layer[LAT_500M_TO_MAX + 1] = {0};
@@ -18,29 +25,60 @@ BLK_METRICS_LAT(write, 512k, in_drv);
 bool block_rq_issue_enabled = false;
 bool block_rq_complete_enabled = false;
 module_param(block_rq_issue_enabled, bool, S_IRUGO | S_IWUSR);
-MODULE_PARM_DESC(block_rq_issue_enabled, " Debug block_rq_issue");
+MODULE_PARM_DESC(block_rq_issue_enabled, "Enable block_rq_issue debug (default: false)");
 module_param(block_rq_complete_enabled, bool, S_IRUGO | S_IWUSR);
-MODULE_PARM_DESC(block_rq_complete_enabled, " Debug block_rq_complete");
+MODULE_PARM_DESC(block_rq_complete_enabled, "Enable block_rq_complete debug (default: false)");
 
-struct blk_metrics_struct blk_metrics[OP_MAX][CYCLE_MAX][IO_SIZE_MAX] = {0};
-spinlock_t blk_metrics_lock[OP_MAX][CYCLE_MAX][IO_SIZE_MAX];
+struct blk_metrics_struct blk_metrics[OP_MAX][IO_SIZE_MAX] __cacheline_aligned = {0};
+spinlock_t blk_metrics_lock[OP_MAX][IO_SIZE_MAX];
+// Update latency distribution statistical metrics
+static void update_lat_metrics(enum io_op_type op_type, enum io_range io_range,
+                             u64 in_block, u64 in_driver) {
+    int i;
+    struct lat_metrics_map {
+        enum io_op_type op;
+        enum io_range range;
+        atomic64_t *in_blk;
+        atomic64_t *in_drv;
+    } maps[] = {
+        {OP_READ,  IO_SIZE_0_TO_4K,       blk_metrics_lat_read_4k_in_blk,   blk_metrics_lat_read_4k_in_drv},
+        {OP_READ,  IO_SIZE_512K_TO_MAX,   blk_metrics_lat_read_512k_in_blk, blk_metrics_lat_read_512k_in_drv},
+        {OP_WRITE, IO_SIZE_0_TO_4K,       blk_metrics_lat_write_4k_in_blk,  blk_metrics_lat_write_4k_in_drv},
+        {OP_WRITE, IO_SIZE_512K_TO_MAX,   blk_metrics_lat_write_512k_in_blk,blk_metrics_lat_write_512k_in_drv},
+    };
+
+    u64 blk_range = LAT_500M_TO_MAX, drv_range = LAT_500M_TO_MAX;
+    lat_range_check(in_block, blk_range);
+    lat_range_check(in_driver, drv_range);
+
+    for (i = 0; i < ARRAY_SIZE(maps); i++) {
+        if (maps[i].op != op_type || maps[i].range != io_range)
+            continue;
+
+        atomic64_inc(&maps[i].in_blk[blk_range]);
+        atomic64_inc(&maps[i].in_drv[drv_range]);
+        break;
+    }
+}
+
+static void update_metrics(struct blk_metrics_struct *metrics, u32 nr_bytes,
+                          u64 in_block, u64 in_driver) {
+    metrics->total_cnt++;
+    metrics->total_size += nr_bytes;
+    metrics->layer[IN_BLOCK].elapse_time += in_block;
+    metrics->layer[IN_BLOCK].max_time = max(metrics->layer[IN_BLOCK].max_time, in_block);
+    metrics->layer[IN_DRIVER].elapse_time += in_driver;
+    metrics->layer[IN_DRIVER].max_time = max(metrics->layer[IN_DRIVER].max_time, in_driver);
+    metrics->max_time = max(metrics->max_time, in_block + in_driver);
+}
 
 static void block_stat_update(struct request *rq, enum io_op_type op_type,
-                                                  u64 io_complete_time_ns)
+                     u64 io_complete_time_ns, u64 in_block, u64 in_driver)
 {
+    struct blk_metrics_struct *metrics;
     unsigned long flags;
-    u64 elapse = 0;
-    int i = 0;
-    u64 in_driver = (io_complete_time_ns > rq->io_start_time_ns) && rq->io_start_time_ns ?
-                    (io_complete_time_ns - rq->io_start_time_ns) : 0;
-    u64 in_block = (rq->io_start_time_ns > rq->start_time_ns) && rq->start_time_ns ?
-                    (rq->io_start_time_ns - rq->start_time_ns) : 0;
-    u64 in_d_and_b = in_driver + in_block;
-    u64 in_driver_lat_range = LAT_500M_TO_MAX;
-    u64 in_block_lat_range = LAT_500M_TO_MAX;
     enum io_range io_range = IO_SIZE_MAX;
     u32 nr_bytes = blk_rq_bytes(rq);
-
     if (nr_bytes >= IO_SIZE_512K_TO_MAX_MASK) {/* [512K, +∞) */
         io_range = IO_SIZE_512K_TO_MAX;
     } else if (nr_bytes > IO_SIZE_128K_TO_512K_MASK) {/* (128K, 512K) */
@@ -53,109 +91,16 @@ static void block_stat_update(struct request *rq, enum io_op_type op_type,
         io_range = IO_SIZE_0_TO_4K;
     }
 
-    /* 根据不同时间窗口计算一个采样周期内的平均耗时、最大耗时*/
-    for (i = 0; i < CYCLE_MAX; i++) {
-        elapse = io_complete_time_ns - blk_metrics[op_type][i][io_range].timestamp;
-        /* 统计复位(timestamp为0)、统计异常（timestamp比io_complete_time_ns大） */
-        if (unlikely(elapse >= io_complete_time_ns)) {
-            flags = 0;
-            spin_lock_irqsave(&blk_metrics_lock[op_type][i][io_range], flags);
-            blk_metrics[op_type][i][io_range].timestamp = io_complete_time_ns;
-            blk_metrics[op_type][i][io_range].total_cnt = 1;
-            blk_metrics[op_type][i][io_range].total_size = nr_bytes;
-            blk_metrics[op_type][i][io_range].layer[IN_BLOCK].elapse_time = in_block;
-            blk_metrics[op_type][i][io_range].layer[IN_DRIVER].elapse_time = in_driver;
-            blk_metrics[op_type][i][io_range].layer[IN_BLOCK].max_time = in_block;
-            blk_metrics[op_type][i][io_range].layer[IN_DRIVER].max_time = in_driver;
-            blk_metrics[op_type][i][io_range].max_time = in_d_and_b;
-            spin_unlock_irqrestore(&blk_metrics_lock[op_type][i][io_range], flags);
-            elapse = 0;
-            if (op_type == OP_READ) {
-                if (likely(io_range == IO_SIZE_0_TO_4K)) {
-                    lat_range_check(in_block, in_block_lat_range);
-                    lat_range_check(in_driver, in_driver_lat_range);
-                    memset(&blk_metrics_lat_read_4k_in_blk, 0, sizeof(blk_metrics_lat_read_4k_in_blk));
-                    memset(&blk_metrics_lat_read_4k_in_drv, 0, sizeof(blk_metrics_lat_read_4k_in_drv));
-                    atomic64_set(&blk_metrics_lat_read_4k_in_blk[in_block_lat_range], 1);
-                    atomic64_set(&blk_metrics_lat_read_4k_in_drv[in_driver_lat_range], 1);
-                } else if (io_range == IO_SIZE_512K_TO_MAX) {
-                    lat_range_check(in_block, in_block_lat_range);
-                    lat_range_check(in_driver, in_driver_lat_range);
-                    memset(&blk_metrics_lat_read_512k_in_blk, 0, sizeof(blk_metrics_lat_read_512k_in_blk));
-                    memset(&blk_metrics_lat_read_512k_in_drv, 0, sizeof(blk_metrics_lat_read_512k_in_drv));
-                    atomic64_set(&blk_metrics_lat_read_512k_in_blk[in_block_lat_range], 1);
-                    atomic64_set(&blk_metrics_lat_read_512k_in_drv[in_driver_lat_range], 1);
-                }
-            } else if (op_type == OP_WRITE) {
-                if (likely(io_range == IO_SIZE_0_TO_4K)) {
-                    lat_range_check(in_block, in_block_lat_range);
-                    lat_range_check(in_driver, in_driver_lat_range);
-                    memset(&blk_metrics_lat_write_4k_in_blk, 0, sizeof(blk_metrics_lat_write_4k_in_blk));
-                    memset(&blk_metrics_lat_write_4k_in_drv, 0, sizeof(blk_metrics_lat_write_4k_in_drv));
-                    atomic64_set(&blk_metrics_lat_write_4k_in_blk[in_block_lat_range], 1);
-                    atomic64_set(&blk_metrics_lat_write_4k_in_drv[in_driver_lat_range], 1);
-                } else if (io_range == IO_SIZE_512K_TO_MAX) {
-                    lat_range_check(in_block, in_block_lat_range);
-                    lat_range_check(in_driver, in_driver_lat_range);
-                    memset(&blk_metrics_lat_write_512k_in_blk, 0, sizeof(blk_metrics_lat_write_512k_in_blk));
-                    memset(&blk_metrics_lat_write_512k_in_drv, 0, sizeof(blk_metrics_lat_write_512k_in_drv));
-                    atomic64_set(&blk_metrics_lat_write_512k_in_blk[in_block_lat_range], 1);
-                    atomic64_set(&blk_metrics_lat_write_512k_in_drv[in_driver_lat_range], 1);
-                }
-            }
-        } else { /* 没有满足一个采样周期时更新数据 */
-            flags = 0;
-            spin_lock_irqsave(&blk_metrics_lock[op_type][i][io_range], flags);
-            blk_metrics[op_type][i][io_range].total_cnt += 1;
-            blk_metrics[op_type][i][io_range].total_size += nr_bytes;
-            blk_metrics[op_type][i][io_range].layer[IN_BLOCK].elapse_time += in_block;
-            blk_metrics[op_type][i][io_range].layer[IN_DRIVER].elapse_time += in_driver;
+    metrics = &blk_metrics[op_type][io_range];
 
-            /* 最大值 */
-            blk_metrics[op_type][i][io_range].layer[IN_BLOCK].max_time =
-               (blk_metrics[op_type][i][io_range].layer[IN_BLOCK].max_time > in_block) ?
-               blk_metrics[op_type][i][io_range].layer[IN_BLOCK].max_time : in_block;
-            blk_metrics[op_type][i][io_range].layer[IN_DRIVER].max_time =
-               (blk_metrics[op_type][i][io_range].layer[IN_DRIVER].max_time > in_driver) ?
-               blk_metrics[op_type][i][io_range].layer[IN_DRIVER].max_time : in_driver;
-            blk_metrics[op_type][i][io_range].max_time =
-               (blk_metrics[op_type][i][io_range].max_time > in_d_and_b) ?
-               blk_metrics[op_type][i][io_range].max_time : in_d_and_b;
-            spin_unlock_irqrestore(&blk_metrics_lock[op_type][i][io_range], flags);
-            if (op_type == OP_READ) {
-                if (likely(io_range == IO_SIZE_0_TO_4K)) {
-                    lat_range_check(in_block, in_block_lat_range);
-                    lat_range_check(in_driver, in_driver_lat_range);
-                    atomic64_inc(&blk_metrics_lat_read_4k_in_blk[in_block_lat_range]);
-                    atomic64_inc(&blk_metrics_lat_read_4k_in_drv[in_driver_lat_range]);
-                } else if (io_range == IO_SIZE_512K_TO_MAX) {
-                    lat_range_check(in_block, in_block_lat_range);
-                    lat_range_check(in_driver, in_driver_lat_range);
-                    atomic64_inc(&blk_metrics_lat_read_512k_in_blk[in_block_lat_range]);
-                    atomic64_inc(&blk_metrics_lat_read_512k_in_drv[in_driver_lat_range]);
-                }
-            } else if (op_type == OP_WRITE) {
-                if (likely(io_range == IO_SIZE_0_TO_4K)) {
-                    lat_range_check(in_block, in_block_lat_range);
-                    lat_range_check(in_driver, in_driver_lat_range);
-                    atomic64_inc(&blk_metrics_lat_write_4k_in_blk[in_block_lat_range]);
-                    atomic64_inc(&blk_metrics_lat_write_4k_in_drv[in_driver_lat_range]);
-                } else if (io_range == IO_SIZE_512K_TO_MAX) {
-                    lat_range_check(in_block, in_block_lat_range);
-                    lat_range_check(in_driver, in_driver_lat_range);
-                    atomic64_inc(&blk_metrics_lat_write_512k_in_blk[in_block_lat_range]);
-                    atomic64_inc(&blk_metrics_lat_write_512k_in_drv[in_driver_lat_range]);
-                }
-            }
+    spin_lock_irqsave(&blk_metrics_lock[op_type][io_range], flags);
+    update_metrics(metrics, nr_bytes, in_block, in_driver);
+    spin_unlock_irqrestore(&blk_metrics_lock[op_type][io_range], flags);
 
-        }
-        if (unlikely(elapse >= sample_cycle_config[i].cycle_value)) {
-            /* 过期复位 */
-            flags = 0;
-            spin_lock_irqsave(&blk_metrics_lock[op_type][i][io_range], flags);
-            blk_metrics[op_type][i][io_range].timestamp = 0;
-            spin_unlock_irqrestore(&blk_metrics_lock[op_type][i][io_range], flags);
-        }
+    // Update latency statistics (only focus on read/write of 4K and above 512K)
+    if ((op_type == OP_READ || op_type == OP_WRITE) &&
+        (io_range == IO_SIZE_0_TO_4K || io_range == IO_SIZE_512K_TO_MAX)) {
+        update_lat_metrics(op_type, io_range, in_block, in_driver);
     }
 }
 
@@ -173,65 +118,73 @@ static char *blk_get_disk_name(struct gendisk *hd, int partno, char *buf)
 }
 #endif
 
-static void blk_fill_rwbs_private(char *rwbs, unsigned int op, int bytes)
-{
+static void append_char(char *rwbs, int *i, size_t max_len, char c) {
+    if (*i < max_len) {
+        rwbs[*i] = c;
+        (*i)++;
+    }
+}
+
+static void blk_fill_rwbs_private(char *rwbs, unsigned int op, int bytes) {
     int i = 0;
+    const size_t max_len = RWBS_LEN - 1;
+
     if (op & REQ_PREFLUSH)
-        rwbs[i++] = 'F';
+        append_char(rwbs, &i, max_len, 'F');
+
     switch (op & REQ_OP_MASK) {
-    case REQ_OP_WRITE:
+        case REQ_OP_WRITE:
 #if LINUX_VERSION_CODE <= KERNEL_VERSION(6, 1, 0)
-    case REQ_OP_WRITE_SAME:
+        case REQ_OP_WRITE_SAME:
 #endif
-        rwbs[i++] = 'W';
-        break;
-    case REQ_OP_DISCARD:
-        rwbs[i++] = 'D';
-        break;
-    case REQ_OP_SECURE_ERASE:
-        rwbs[i++] = 'D';
-        rwbs[i++] = 'E';
-        break;
-    case REQ_OP_FLUSH:
-        rwbs[i++] = 'F';
-        break;
-    case REQ_OP_READ:
-        rwbs[i++] = 'R';
-        break;
-    default:
-        rwbs[i++] = 'N';
+            append_char(rwbs, &i, max_len, 'W');
+            break;
+
+        case REQ_OP_DISCARD:
+            append_char(rwbs, &i, max_len, 'D');
+            break;
+
+        case REQ_OP_SECURE_ERASE:
+            append_char(rwbs, &i, max_len, 'D');
+            append_char(rwbs, &i, max_len, 'E');
+            break;
+
+        case REQ_OP_FLUSH:
+            append_char(rwbs, &i, max_len, 'F');
+            break;
+
+        case REQ_OP_READ:
+            append_char(rwbs, &i, max_len, 'R');
+            break;
+
+        default:
+            append_char(rwbs, &i, max_len, 'N');
     }
     if (op & REQ_FUA)
-        rwbs[i++] = 'F';
+        append_char(rwbs, &i, max_len, 'F');
     if (op & REQ_RAHEAD)
-        rwbs[i++] = 'A';
+        append_char(rwbs, &i, max_len, 'A');
     if (op & REQ_SYNC)
-        rwbs[i++] = 'S';
+        append_char(rwbs, &i, max_len, 'S');
     if (op & REQ_META)
-        rwbs[i++] = 'M';
+        append_char(rwbs, &i, max_len, 'M');
+
     rwbs[i] = '\0';
 }
 
 #if LINUX_VERSION_CODE <= KERNEL_VERSION(5, 15, 0)
-/**
-There is no consistency between Google and the Linux community here.
-The Linux community only one parameter(request) after 5.10.136, But
-Google Revert the Linux community update to the old version
-on Android 12-5.10-LTS, which means the item on 5.10
-No matter how the small version is upgraded, as long as it is an Android 12-5.10
-project, it will have two parameters(request_queue and request)
-https://android-review.googlesource.com/c/kernel/common/+/2201398
-*/
 static void cb_block_rq_issue(void *ignore, struct request_queue *q,
                              struct request *rq)
 #else
 static void cb_block_rq_issue(void *ignore, struct request *rq)
-#endif /* LINUX_VERSION_CODE <= KERNEL_VERSION(5, 10, 136) */
+#endif
 {
     if (unlikely(!io_metrics_enabled)) {
         return ;
     }
-    rq->io_start_time_ns = ktime_get_ns();
+    rq->io_start_time_ns = ktime_get_ns();  // Record driver layer start time
+
+    // Debug information printing
     if (unlikely(io_metrics_debug_enabled || block_rq_issue_enabled)) {
 #if LINUX_VERSION_CODE <= KERNEL_VERSION(6, 1, 0)
         char *devname = rq->rq_disk ? rq->rq_disk->disk_name : "";
@@ -248,6 +201,27 @@ static void cb_block_rq_issue(void *ignore, struct request *rq)
           devname, rwbs, nr_bytes, rq->start_time_ns, rq->io_start_time_ns);
     }
 }
+
+static void print_completion_debug(struct request *rq, unsigned int nr_bytes,
+                                  blk_status_t error, u64 complete_time,
+                                  u64 in_driver, u64 in_block) {
+    char devname[BDEVNAME_SIZE] = {0};
+    char rwbs[RWBS_LEN] = {0};
+    blk_fill_rwbs_private(rwbs, rq->cmd_flags, nr_bytes);
+
+#if LINUX_VERSION_CODE <= KERNEL_VERSION(5, 11, 0)
+    if (rq->bio && rq->bio->bi_disk) {
+        blk_get_disk_name(rq->bio->bi_disk, rq->bio->bi_partno, devname);
+    }
+#endif
+    io_metrics_print("dev:%-6s rwbs:%-4s nr_bytes:%-10d error:%-3d "
+                    "start_time_ns:%-16llu io_start_time_ns:%-16llu "
+                    "io_complete_time_ns:%-16llu in_driver:%-10llu in_block:%-10llu\n",
+                    devname, rwbs, nr_bytes, error,
+                    rq->start_time_ns, rq->io_start_time_ns, complete_time,
+                    in_driver, in_block);
+}
+
 #if LINUX_VERSION_CODE <= KERNEL_VERSION(6, 1, 0)
 static void cb_block_rq_complete(void *ignore, struct request *rq,
                       int error, unsigned int nr_bytes)
@@ -257,13 +231,16 @@ static void cb_block_rq_complete(void *ignore, struct request *rq,
 #endif
 {
     u64 io_complete_time_ns = ktime_get_ns();
-    u64 in_driver = (io_complete_time_ns > rq->io_start_time_ns) && rq->io_start_time_ns ?
-                    (io_complete_time_ns - rq->io_start_time_ns) : 0;
-    u64 in_block = (rq->io_start_time_ns > rq->start_time_ns) && rq->start_time_ns ?
-                    (rq->io_start_time_ns - rq->start_time_ns) : 0;
+    u64 in_driver = ((io_complete_time_ns > rq->io_start_time_ns) && rq->io_start_time_ns) ?
+                   (io_complete_time_ns - rq->io_start_time_ns) : 0;
+    u64 in_block = ((rq->io_start_time_ns > rq->start_time_ns) && rq->start_time_ns) ?
+                  (rq->io_start_time_ns - rq->start_time_ns) : 0;
+
+    if (!nr_bytes)
+        return;
 
     if (unlikely(!io_metrics_enabled)) {
-        return ;
+        return;
     }
 
     switch (rq->cmd_flags & REQ_OP_MASK) {
@@ -271,362 +248,339 @@ static void cb_block_rq_complete(void *ignore, struct request *rq,
 #if LINUX_VERSION_CODE <= KERNEL_VERSION(6, 1, 0)
         case REQ_OP_WRITE_SAME:
 #endif
-            if (!error && nr_bytes) {
-#if 1
-                block_stat_update(rq, OP_WRITE, io_complete_time_ns);
-#endif
-#if 0
-                if (rq->cmd_flags & REQ_SYNC) {
-                    block_stat_update(rq, OP_WRITE_SYNC, io_complete_time_ns);
-                } else if (rq->cmd_flags & REQ_META) {
-                    block_stat_update(rq, OP_WRITE_META, io_complete_time_ns);
-                } else {
-                    block_stat_update(rq, OP_WRITE, io_complete_time_ns);
-                }
-#endif
-            }
+            if (!error && nr_bytes)
+                block_stat_update(rq, OP_WRITE, io_complete_time_ns, in_block, in_driver);
             break;
-#if 0
-        case REQ_OP_DISCARD:
-            if (!error && nr_bytes) {
-                block_stat_update(rq, OP_DISCARD, io_complete_time_ns);
-            }
-            break;
-        case REQ_OP_SECURE_ERASE:
-            if (!error && nr_bytes) {
-                block_stat_update(rq, OP_SECURE_ERASE, io_complete_time_ns);
-            }
-            break;
-        case REQ_OP_FLUSH:
-            if (!error && nr_bytes) {
-                block_stat_update(rq, OP_FLUSH, io_complete_time_ns);
-            }
-            break;
-#endif
         case REQ_OP_READ:
-            if (!error && nr_bytes) {
-#if 1
-                block_stat_update(rq, OP_READ, io_complete_time_ns);
-#endif
-#if 0
-                if (rq->cmd_flags & REQ_RAHEAD) {
-                    block_stat_update(rq, OP_RAHEAD, io_complete_time_ns);
-                } else if (rq->cmd_flags & REQ_META) {
-                    block_stat_update(rq, OP_READ_META, io_complete_time_ns);
-                }else {
-                    block_stat_update(rq, OP_READ, io_complete_time_ns);
-                }
-#endif
-            }
+            if (!error && nr_bytes)
+                block_stat_update(rq, OP_READ, io_complete_time_ns, in_block, in_driver);
             break;
         default:
             break;
     }
 
-    if (unlikely(io_metrics_debug_enabled || block_rq_complete_enabled)) {
-        char devname[BDEVNAME_SIZE] = {0};
-        char rwbs[RWBS_LEN]={0};
-
-        blk_fill_rwbs_private(rwbs, rq->cmd_flags, nr_bytes);
-#if LINUX_VERSION_CODE <= KERNEL_VERSION(5, 11, 0)
-        if (rq->bio && rq->bio->bi_disk) {
-            blk_get_disk_name(rq->bio->bi_disk, rq->bio->bi_partno, devname);
-#else
-        if (rq->bio && rq->bio->bi_bdev) {
-        //todo 通过block_device获取设备名称
-        //disk_name(rq->bio->bi_disk, rq->bio->bi_partno, devname);
-        devname[0] = '\0';
-#endif
-        } else {
-            devname[0] = '\0';
-        }
-
-        io_metrics_print("dev:%-6s rwbs:%-4s nr_bytes:%-10d error:%-3d " \
-            "start_time_ns:%-16llu io_start_time_ns:%-16llu io_complete_time_ns:%-16llu " \
-            "in_driver:%-10llu in_block:%-10llu\n", devname, rwbs, nr_bytes,
-            error, rq->start_time_ns, rq->io_start_time_ns, io_complete_time_ns,
-            in_driver, in_block);
-    }
-    return;
+    // Debug printing
+    if (unlikely(io_metrics_debug_enabled || block_rq_complete_enabled))
+        print_completion_debug(rq, nr_bytes, error, io_complete_time_ns, in_driver, in_block);
 }
-
-struct {
-    const char *name;
-    void *callback;
-    struct tracepoint *tp;
-    void *data;
-} tracepoint_probes[] = {
-    {"block_rq_issue", cb_block_rq_issue, NULL, NULL},
-    {"block_rq_complete", cb_block_rq_complete, NULL, NULL},
-    {NULL, NULL, NULL, NULL}
-};
 
 void block_register_tracepoint_probes(void)
 {
     int ret;
-
     ret = register_trace_block_rq_issue(cb_block_rq_issue, NULL);
+    WARN_ON(ret);
     ret = register_trace_block_rq_complete(cb_block_rq_complete, NULL);
-
-    return;
+    WARN_ON(ret);
 }
 
 void block_unregister_tracepoint_probes(void)
 {
     unregister_trace_block_rq_issue(cb_block_rq_issue, NULL);
     unregister_trace_block_rq_complete(cb_block_rq_complete, NULL);
-
-    return;
 }
 
-struct {
-    enum io_op_type value;
-    const char * tag;
-} io_op_config[] = {
-    {OP_READ,         "read"      },
-    {OP_WRITE,        "write"     },
-#if 0
-    {OP_RAHEAD,       "rahead"    },
-    {OP_WRITE_SYNC,   "write_sync"},
-    {OP_READ_META,    "read_meta" },
-    {OP_WRITE_META,   "write_meta"},
-    {OP_DISCARD,      "discard"   },
-    {OP_SECURE_ERASE, "erase"     },
-    {OP_FLUSH,        "flush"     },
-#endif
-    {OP_MAX,          NULL        },
+static int handle_cnt(struct seq_file *m, enum io_op_type op)
+{
+    u64 cnt = 0;
+    unsigned long flags;
+    int i;
+    for (i = 0; i < IO_SIZE_MAX; i++) {
+        spin_lock_irqsave(&blk_metrics_lock[op][i], flags);
+        cnt += blk_metrics[op][i].total_cnt;
+        spin_unlock_irqrestore(&blk_metrics_lock[op][i], flags);
+    }
+    seq_printf(m, "%llu\n", cnt);
+    return 0;
+}
+
+static int handle_avg_size(struct seq_file *m, enum io_op_type op)
+{
+    u64 total_size = 0, total_cnt = 0;
+    unsigned long flags;
+    int i;
+    for (i = 0; i < IO_SIZE_MAX; i++) {
+        spin_lock_irqsave(&blk_metrics_lock[op][i], flags);
+        total_size += blk_metrics[op][i].total_size;
+        total_cnt += blk_metrics[op][i].total_cnt;
+        spin_unlock_irqrestore(&blk_metrics_lock[op][i], flags);
+    }
+    seq_printf(m, "%llu\n", total_cnt ? (total_size / total_cnt) : 0);
+    return 0;
+}
+
+static int handle_size_dist(struct seq_file *m, enum io_op_type op)
+{
+    unsigned long flags;
+    int i;
+    for (i = 0; i < IO_SIZE_MAX; i++) {
+        spin_lock_irqsave(&blk_metrics_lock[op][i], flags);
+        seq_printf(m, "%llu,", blk_metrics[op][i].total_cnt);
+        spin_unlock_irqrestore(&blk_metrics_lock[op][i], flags);
+    }
+    seq_printf(m, "\n");
+    return 0;
+}
+
+static int handle_avg_time(struct seq_file *m, enum io_op_type op)
+{
+    u64 total_time = 0, total_cnt = 0;
+    unsigned long flags;
+    int i;
+    for (i = 0; i < IO_SIZE_MAX; i++) {
+        spin_lock_irqsave(&blk_metrics_lock[op][i], flags);
+        total_time += blk_metrics[op][i].layer[IN_BLOCK].elapse_time;
+        total_time += blk_metrics[op][i].layer[IN_DRIVER].elapse_time;
+        total_cnt += blk_metrics[op][i].total_cnt;
+        spin_unlock_irqrestore(&blk_metrics_lock[op][i], flags);
+    }
+    seq_printf(m, "%llu\n", total_cnt ? (total_time / total_cnt) : 0);
+    return 0;
+}
+
+static int handle_max_time(struct seq_file *m, enum io_op_type op)
+{
+    u64 max_time = 0;
+    unsigned long flags;
+    int i;
+    for (i = 0; i < IO_SIZE_MAX; i++) {
+        spin_lock_irqsave(&blk_metrics_lock[op][i], flags);
+        max_time = max(max_time, blk_metrics[op][i].max_time);
+        spin_unlock_irqrestore(&blk_metrics_lock[op][i], flags);
+    }
+    seq_printf(m, "%llu\n", max_time);
+    return 0;
+}
+
+static int handle_4k_blk_avg_time(struct seq_file *m, enum io_op_type op)
+{
+    u64 cnt = 0, time = 0;
+    unsigned long flags;
+    enum io_range range = IO_SIZE_0_TO_4K;
+    spin_lock_irqsave(&blk_metrics_lock[op][range], flags);
+    cnt = blk_metrics[op][range].total_cnt;
+    time = blk_metrics[op][range].layer[IN_BLOCK].elapse_time;
+    spin_unlock_irqrestore(&blk_metrics_lock[op][range], flags);
+    seq_printf(m, "%llu\n", cnt ? (time / cnt) : 0);
+    return 0;
+}
+
+static int handle_4k_blk_max_time(struct seq_file *m, enum io_op_type op)
+{
+    u64 max_time = 0;
+    unsigned long flags;
+    enum io_range range = IO_SIZE_0_TO_4K;
+    spin_lock_irqsave(&blk_metrics_lock[op][range], flags);
+    max_time = blk_metrics[op][range].layer[IN_BLOCK].max_time;
+    spin_unlock_irqrestore(&blk_metrics_lock[op][range], flags);
+    seq_printf(m, "%llu\n", max_time);
+    return 0;
+}
+
+static int handle_4k_blk_lat_dist(struct seq_file *m, enum io_op_type op)
+{
+    int i;
+    atomic64_t *lat_array = (op == OP_READ) ? blk_metrics_lat_read_4k_in_blk :
+                                           blk_metrics_lat_write_4k_in_blk;
+    for (i = 0; i <= LAT_500M_TO_MAX; i++)
+        seq_printf(m, "%lld,", atomic64_read(&lat_array[i]));
+    seq_putc(m, '\n');
+    return 0;
+}
+
+static int handle_4k_drv_avg_time(struct seq_file *m, enum io_op_type op)
+{
+    u64 cnt = 0, time = 0;
+    unsigned long flags;
+    enum io_range range = IO_SIZE_0_TO_4K;
+    spin_lock_irqsave(&blk_metrics_lock[op][range], flags);
+    cnt = blk_metrics[op][range].total_cnt;
+    time = blk_metrics[op][range].layer[IN_DRIVER].elapse_time;
+    spin_unlock_irqrestore(&blk_metrics_lock[op][range], flags);
+    seq_printf(m, "%llu\n", cnt ? (time / cnt) : 0);
+    return 0;
+}
+
+static int handle_4k_drv_max_time(struct seq_file *m, enum io_op_type op)
+{
+    u64 max_time = 0;
+    unsigned long flags;
+    enum io_range range = IO_SIZE_0_TO_4K;
+    spin_lock_irqsave(&blk_metrics_lock[op][range], flags);
+    max_time = blk_metrics[op][range].layer[IN_DRIVER].max_time;
+    spin_unlock_irqrestore(&blk_metrics_lock[op][range], flags);
+    seq_printf(m, "%llu\n", max_time);
+    return 0;
+}
+
+static int handle_4k_drv_lat_dist(struct seq_file *m, enum io_op_type op)
+{
+    int i;
+    atomic64_t *lat_array = (op == OP_READ) ? blk_metrics_lat_read_4k_in_drv :
+                                           blk_metrics_lat_write_4k_in_drv;
+    for (i = 0; i <= LAT_500M_TO_MAX; i++)
+        seq_printf(m, "%lld,", atomic64_read(&lat_array[i]));
+    seq_putc(m, '\n');
+    return 0;
+}
+
+static int handle_512k_blk_avg_time(struct seq_file *m, enum io_op_type op)
+{
+    u64 cnt = 0, time = 0;
+    unsigned long flags;
+    enum io_range range = IO_SIZE_512K_TO_MAX;
+    spin_lock_irqsave(&blk_metrics_lock[op][range], flags);
+    cnt = blk_metrics[op][range].total_cnt;
+    time = blk_metrics[op][range].layer[IN_BLOCK].elapse_time;
+    spin_unlock_irqrestore(&blk_metrics_lock[op][range], flags);
+    seq_printf(m, "%llu\n", cnt ? (time / cnt) : 0);
+    return 0;
+}
+
+static int handle_512k_blk_max_time(struct seq_file *m, enum io_op_type op)
+{
+    u64 max_time = 0;
+    unsigned long flags;
+    enum io_range range = IO_SIZE_512K_TO_MAX;
+    spin_lock_irqsave(&blk_metrics_lock[op][range], flags);
+    max_time = blk_metrics[op][range].layer[IN_BLOCK].max_time;
+    spin_unlock_irqrestore(&blk_metrics_lock[op][range], flags);
+    seq_printf(m, "%llu\n", max_time);
+    return 0;
+}
+
+static int handle_512k_blk_lat_dist(struct seq_file *m, enum io_op_type op) {
+    int i;
+    atomic64_t *lat_array = (op == OP_READ) ? blk_metrics_lat_read_512k_in_blk :
+                                           blk_metrics_lat_write_512k_in_blk;
+    for (i = 0; i <= LAT_500M_TO_MAX; i++)
+        seq_printf(m, "%lld,", atomic64_read(&lat_array[i]));
+    seq_putc(m, '\n');
+    return 0;
+}
+
+static int handle_512k_drv_avg_time(struct seq_file *m, enum io_op_type op)
+{
+    u64 cnt = 0, time = 0;
+    unsigned long flags;
+    enum io_range range = IO_SIZE_512K_TO_MAX;
+    spin_lock_irqsave(&blk_metrics_lock[op][range], flags);
+    cnt = blk_metrics[op][range].total_cnt;
+    time = blk_metrics[op][range].layer[IN_DRIVER].elapse_time;
+    spin_unlock_irqrestore(&blk_metrics_lock[op][range], flags);
+    seq_printf(m, "%llu\n", cnt ? (time / cnt) : 0);
+    return 0;
+}
+
+static int handle_512k_drv_max_time(struct seq_file *m, enum io_op_type op)
+{
+    u64 max_time = 0;
+    unsigned long flags;
+    enum io_range range = IO_SIZE_512K_TO_MAX;
+    spin_lock_irqsave(&blk_metrics_lock[op][range], flags);
+    max_time = blk_metrics[op][range].layer[IN_DRIVER].max_time;
+    spin_unlock_irqrestore(&blk_metrics_lock[op][range], flags);
+    seq_printf(m, "%llu\n", max_time);
+    return 0;
+}
+
+static int handle_512k_drv_lat_dist(struct seq_file *m, enum io_op_type op) {
+    int i;
+    atomic64_t *lat_array = (op == OP_READ) ? blk_metrics_lat_read_512k_in_drv :
+                                           blk_metrics_lat_write_512k_in_drv;
+    for (i = 0; i <= LAT_500M_TO_MAX; i++)
+        seq_printf(m, "%lld,", atomic64_read(&lat_array[i]));
+    seq_putc(m, '\n');
+    return 0;
+}
+
+typedef int (*metric_handler_func)(struct seq_file *, enum io_op_type);
+
+/* Metric mapping table - using the same style as ufs_metric_maps */
+static const struct {
+    const char *name;
+    size_t name_len;
+    enum io_op_type op;
+    metric_handler_func handler;
+} blk_metric_maps[] = {
+    {"bio_read_cnt",               sizeof("bio_read_cnt")-1,                 OP_READ,  handle_cnt,             },
+    {"bio_read_avg_size",          sizeof("bio_read_avg_size")-1,            OP_READ,  handle_avg_size,        },
+    {"bio_read_size_dist",         sizeof("bio_read_size_dist")-1,           OP_READ,  handle_size_dist,       },
+    {"bio_read_avg_time",          sizeof("bio_read_avg_time")-1,            OP_READ,  handle_avg_time,        },
+    {"bio_read_max_time",          sizeof("bio_read_max_time")-1,            OP_READ,  handle_max_time,        },
+    {"bio_read_4k_blk_avg_time",   sizeof("bio_read_4k_blk_avg_time")-1,     OP_READ,  handle_4k_blk_avg_time, },
+    {"bio_read_4k_blk_max_time",   sizeof("bio_read_4k_blk_max_time")-1,     OP_READ,  handle_4k_blk_max_time, },
+    {"bio_read_4k_blk_lat_dist",   sizeof("bio_read_4k_blk_lat_dist")-1,     OP_READ,  handle_4k_blk_lat_dist, },
+    {"bio_read_4k_drv_avg_time",   sizeof("bio_read_4k_drv_avg_time")-1,     OP_READ,  handle_4k_drv_avg_time, },
+    {"bio_read_4k_drv_max_time",   sizeof("bio_read_4k_drv_max_time")-1,     OP_READ,  handle_4k_drv_max_time, },
+    {"bio_read_4k_drv_lat_dist",   sizeof("bio_read_4k_drv_lat_dist")-1,     OP_READ,  handle_4k_drv_lat_dist, },
+    {"bio_read_512k_blk_avg_time", sizeof("bio_read_512k_blk_avg_time")-1,   OP_READ,  handle_512k_blk_avg_time},
+    {"bio_read_512k_blk_max_time", sizeof("bio_read_512k_blk_max_time")-1,   OP_READ,  handle_512k_blk_max_time},
+    {"bio_read_512k_blk_lat_dist", sizeof("bio_read_512k_blk_lat_dist")-1,   OP_READ,  handle_512k_blk_lat_dist},
+    {"bio_read_512k_drv_avg_time", sizeof("bio_read_512k_drv_avg_time")-1,   OP_READ,  handle_512k_drv_avg_time},
+    {"bio_read_512k_drv_max_time", sizeof("bio_read_512k_drv_max_time")-1,   OP_READ,  handle_512k_drv_max_time},
+    {"bio_read_512k_drv_lat_dist", sizeof("bio_read_512k_drv_lat_dist")-1,   OP_READ,  handle_512k_drv_lat_dist},
+
+    {"bio_write_cnt",               sizeof("bio_write_cnt")-1,               OP_WRITE, handle_cnt,             },
+    {"bio_write_avg_size",          sizeof("bio_write_avg_size")-1,          OP_WRITE, handle_avg_size,        },
+    {"bio_write_size_dist",         sizeof("bio_write_size_dist")-1,         OP_WRITE, handle_size_dist,       },
+    {"bio_write_avg_time",          sizeof("bio_write_avg_time")-1,          OP_WRITE, handle_avg_time,        },
+    {"bio_write_max_time",          sizeof("bio_write_max_time")-1,          OP_WRITE, handle_max_time,        },
+    {"bio_write_4k_blk_avg_time",   sizeof("bio_write_4k_blk_avg_time")-1,   OP_WRITE, handle_4k_blk_avg_time, },
+    {"bio_write_4k_blk_max_time",   sizeof("bio_write_4k_blk_max_time")-1,   OP_WRITE, handle_4k_blk_max_time, },
+    {"bio_write_4k_blk_lat_dist",   sizeof("bio_write_4k_blk_lat_dist")-1,   OP_WRITE, handle_4k_blk_lat_dist, },
+    {"bio_write_4k_drv_avg_time",   sizeof("bio_write_4k_drv_avg_time")-1,   OP_WRITE, handle_4k_drv_avg_time, },
+    {"bio_write_4k_drv_max_time",   sizeof("bio_write_4k_drv_max_time")-1,   OP_WRITE, handle_4k_drv_max_time, },
+    {"bio_write_4k_drv_lat_dist",   sizeof("bio_write_4k_drv_lat_dist")-1,   OP_WRITE, handle_4k_drv_lat_dist, },
+    {"bio_write_512k_blk_avg_time", sizeof("bio_write_512k_blk_avg_time")-1, OP_WRITE, handle_512k_blk_avg_time},
+    {"bio_write_512k_blk_max_time", sizeof("bio_write_512k_blk_max_time")-1, OP_WRITE, handle_512k_blk_max_time},
+    {"bio_write_512k_blk_lat_dist", sizeof("bio_write_512k_blk_lat_dist")-1, OP_WRITE, handle_512k_blk_lat_dist},
+    {"bio_write_512k_drv_avg_time", sizeof("bio_write_512k_drv_avg_time")-1, OP_WRITE, handle_512k_drv_avg_time},
+    {"bio_write_512k_drv_max_time", sizeof("bio_write_512k_drv_max_time")-1, OP_WRITE, handle_512k_drv_max_time},
+    {"bio_write_512k_drv_lat_dist", sizeof("bio_write_512k_drv_lat_dist")-1, OP_WRITE, handle_512k_drv_lat_dist},
+
+    {NULL, 0, OP_MAX, NULL}  // Terminator
 };
 
-/*当前函数理论每个node一天只需要访问一次，因此可以不用太考虑性能，只关注代码紧凑性*/
-static int block_metrics_proc_show(struct seq_file *seq_filp, void *data)
+static int get_metric_value(struct seq_file *seq, const char *metric_name)
 {
-    int i = 0;
-    enum io_op_type io_op;
-    u64 value = 0;
-    enum sample_cycle_type cycle;
-    struct file *file = (struct file *)seq_filp->private;
+    int i;
+    int metric_name_len = strlen(metric_name);
+    for (i = 0; blk_metric_maps[i].name; i++) {
+        if (metric_name_len != blk_metric_maps[i].name_len)
+            continue;
+
+        if (strncmp(metric_name, blk_metric_maps[i].name, metric_name_len) == 0) {
+            return blk_metric_maps[i].handler(seq, blk_metric_maps[i].op);
+        }
+    }
+    io_metrics_print("unknown metric: %s\n", metric_name);
+    return -EINVAL;
+}
+
+static int block_metrics_proc_show(struct seq_file *m, void *data)
+{
+    struct file *file = m->private;
+    const char *node_name;
 
     if (unlikely(!io_metrics_enabled)) {
-        seq_printf(seq_filp, "io_metrics_enabled not set to 1:%d\n", io_metrics_enabled);
+        seq_printf(m, "io_metrics_enabled not set to 1:%d\n", io_metrics_enabled);
         return 0;
     }
-    if (proc_show_enabled ||unlikely(io_metrics_debug_enabled)) {
+
+    if (!file)
+        return -EINVAL;
+
+    if (!file->f_path.dentry || !file->f_path.dentry->d_parent)
+        return -ENOENT;
+
+    node_name = file->f_path.dentry->d_iname;
+    if (proc_show_enabled || unlikely(io_metrics_debug_enabled)) {
         io_metrics_print("%s(%d) read %s/%s\n",
-            current->comm, current->pid, file->f_path.dentry->d_parent->d_iname,
+            current->comm, current->pid,
+            file->f_path.dentry->d_parent->d_iname,
             file->f_path.dentry->d_iname);
     }
-    /* 确定采样周期的值（父目录） */
-    cycle = CYCLE_MAX;
-    for (i = 0; i < CYCLE_MAX; i++) {
-        if(!strcmp(file->f_path.dentry->d_parent->d_iname, sample_cycle_config[i].tag)) {
-            cycle = sample_cycle_config[i].value;
-        }
-    }
-    if (unlikely(cycle == CYCLE_MAX)) {
-        goto err;
-    }
-
-    /* 确定读、写操作命令 */
-    io_op = OP_MAX;
-    for (i = 0; i < OP_MAX; i++) {
-        if (strstr(file->f_path.dentry->d_iname, io_op_config[i].tag)) {
-            io_op = io_op_config[i].value;
-            break;
-        }
-    }
-    if (unlikely(io_op == OP_MAX)) {
-        goto err;
-    }
-    if (OP_MAX == OP_READ) {
-        goto bio_read;
-    } else if (OP_MAX == OP_WRITE) {
-         goto bio_write;
-    }
-
-    /* 确定读的具体是那个节点 */
-bio_read:
-    if (!strcmp(file->f_path.dentry->d_iname, "bio_read_cnt")) {
-        value = 0;
-        for (i = 0; i < IO_SIZE_MAX; i++) {
-            value += blk_metrics[OP_READ][cycle][i].total_cnt;
-        }
-    } else if (!strcmp(file->f_path.dentry->d_iname, "bio_read_avg_size")) {
-        unsigned long flags = 0;
-        u64 total_size = 0;
-        u64 total_cnt = 0;
-        value = 0;
-        for (i = 0; i < IO_SIZE_MAX; i++) {
-            flags = 0;
-            spin_lock_irqsave(&blk_metrics_lock[OP_READ][cycle][i], flags);
-            total_size += blk_metrics[OP_READ][cycle][i].total_size;
-            total_cnt += blk_metrics[OP_READ][cycle][i].total_cnt;
-            spin_unlock_irqrestore(&blk_metrics_lock[OP_READ][cycle][i], flags);
-        }
-        value = total_size / total_cnt;
-    } else if (!strcmp(file->f_path.dentry->d_iname, "bio_read_size_dist")) {
-        for (i = 0; i < IO_SIZE_MAX; i++) {
-            seq_printf(seq_filp, "%llu,", blk_metrics[OP_READ][cycle][i].total_cnt);
-        }
-        seq_printf(seq_filp, "\n");
-        return 0;
-    } else if (!strcmp(file->f_path.dentry->d_iname, "bio_read_avg_time")) {
-        u64 total_time = 0;
-        u64 total_cnt = 0;
-        value = 0;
-        for (i = 0; i < IO_SIZE_MAX; i++) {
-            total_time += blk_metrics[OP_READ][cycle][i].layer[IN_BLOCK].elapse_time;
-            total_time += blk_metrics[OP_READ][cycle][i].layer[IN_DRIVER].elapse_time;
-            total_cnt += blk_metrics[OP_READ][cycle][i].total_cnt;
-        }
-        value = total_time / total_cnt;
-    } else if (!strcmp(file->f_path.dentry->d_iname, "bio_read_max_time")) {
-        value = 0;
-        for (i = 0; i < IO_SIZE_MAX; i++) {
-            value = (value > blk_metrics[OP_READ][cycle][i].max_time) ?
-                      value : blk_metrics[OP_READ][cycle][i].max_time;
-        }
-    } else if (!strcmp(file->f_path.dentry->d_iname, "bio_read_4k_blk_avg_time")) {
-        value = blk_metrics[OP_READ][cycle][IO_SIZE_0_TO_4K].layer[IN_BLOCK].elapse_time /
-                blk_metrics[OP_READ][cycle][IO_SIZE_0_TO_4K].total_cnt;
-    } else if (!strcmp(file->f_path.dentry->d_iname, "bio_read_4k_blk_max_time")) {
-        value = blk_metrics[OP_READ][cycle][IO_SIZE_0_TO_4K].layer[IN_BLOCK].max_time;
-    } else if (!strcmp(file->f_path.dentry->d_iname, "bio_read_4k_blk_lat_dist")) {
-        for (i = 0; i <= LAT_500M_TO_MAX; i++) {
-            seq_printf(seq_filp, "%llu,", atomic64_read(&blk_metrics_lat_read_4k_in_blk[i]));
-        }
-        seq_printf(seq_filp, "\n");
-        return 0;
-    } else if (!strcmp(file->f_path.dentry->d_iname, "bio_read_4k_drv_avg_time")) {
-        value = blk_metrics[OP_READ][cycle][IO_SIZE_0_TO_4K].layer[IN_DRIVER].elapse_time /
-                blk_metrics[OP_READ][cycle][IO_SIZE_0_TO_4K].total_cnt;
-    } else if (!strcmp(file->f_path.dentry->d_iname, "bio_read_4k_drv_max_time")) {
-        value = blk_metrics[OP_READ][cycle][IO_SIZE_0_TO_4K].layer[IN_DRIVER].max_time;
-    } else if (!strcmp(file->f_path.dentry->d_iname, "bio_read_4k_drv_lat_dist")) {
-        for (i = 0; i <= LAT_500M_TO_MAX; i++) {
-            seq_printf(seq_filp, "%llu,", atomic64_read(&blk_metrics_lat_read_4k_in_drv[i]));
-        }
-        seq_printf(seq_filp, "\n");
-        return 0;
-    } else if (!strcmp(file->f_path.dentry->d_iname, "bio_read_512k_blk_avg_time")) {
-        value = blk_metrics[OP_READ][cycle][IO_SIZE_512K_TO_MAX].layer[IN_BLOCK].elapse_time /
-                blk_metrics[OP_READ][cycle][IO_SIZE_512K_TO_MAX].total_cnt;
-    } else if (!strcmp(file->f_path.dentry->d_iname, "bio_read_512k_blk_max_time")) {
-        value = blk_metrics[OP_READ][cycle][IO_SIZE_512K_TO_MAX].layer[IN_BLOCK].max_time;
-    } else if (!strcmp(file->f_path.dentry->d_iname, "bio_read_512k_blk_lat_dist")) {
-        for (i = 0; i <= LAT_500M_TO_MAX; i++) {
-            seq_printf(seq_filp, "%llu,", atomic64_read(&blk_metrics_lat_read_512k_in_blk[i]));
-        }
-        seq_printf(seq_filp, "\n");
-        return 0;
-    } else if (!strcmp(file->f_path.dentry->d_iname, "bio_read_512k_drv_avg_time")) {
-        value = blk_metrics[OP_READ][cycle][IO_SIZE_512K_TO_MAX].layer[IN_DRIVER].elapse_time /
-                blk_metrics[OP_READ][cycle][IO_SIZE_512K_TO_MAX].total_cnt;
-    } else if (!strcmp(file->f_path.dentry->d_iname, "bio_read_512k_drv_max_time")) {
-        value = blk_metrics[OP_READ][cycle][IO_SIZE_512K_TO_MAX].layer[IN_DRIVER].max_time;
-    } else if (!strcmp(file->f_path.dentry->d_iname, "bio_read_512k_drv_lat_dist")) {
-        for (i = 0; i <= LAT_500M_TO_MAX; i++) {
-            seq_printf(seq_filp, "%llu,", atomic64_read(&blk_metrics_lat_read_512k_in_drv[i]));
-        }
-        seq_printf(seq_filp, "\n");
-        return 0;
-    }
-
-bio_write:
-    if (!strcmp(file->f_path.dentry->d_iname, "bio_write_cnt")) {
-        value = 0;
-        for (i = 0; i < IO_SIZE_MAX; i++) {
-            value += blk_metrics[OP_WRITE][cycle][i].total_cnt;
-        }
-    } else if (!strcmp(file->f_path.dentry->d_iname, "bio_write_avg_size")) {
-        unsigned long flags = 0;
-        u64 total_size = 0;
-        u64 total_cnt = 0;
-        value = 0;
-        for (i = 0; i < IO_SIZE_MAX; i++) {
-            flags = 0;
-            spin_lock_irqsave(&blk_metrics_lock[OP_WRITE][cycle][i], flags);
-            total_size += blk_metrics[OP_WRITE][cycle][i].total_size;
-            total_cnt += blk_metrics[OP_WRITE][cycle][i].total_cnt;
-            spin_unlock_irqrestore(&blk_metrics_lock[OP_WRITE][cycle][i], flags);
-        }
-        value = total_size / total_cnt;
-    } else if (!strcmp(file->f_path.dentry->d_iname, "bio_write_size_dist")) {
-        for (i = 0; i < IO_SIZE_MAX; i++) {
-            seq_printf(seq_filp, "%llu,", blk_metrics[OP_WRITE][cycle][i].total_cnt);
-        }
-        seq_printf(seq_filp, "\n");
-        return 0;
-    } else if (!strcmp(file->f_path.dentry->d_iname, "bio_write_avg_time")) {
-        u64 total_time = 0;
-        u64 total_cnt = 0;
-        value = 0;
-        for (i = 0; i < IO_SIZE_MAX; i++) {
-            total_time += blk_metrics[OP_WRITE][cycle][i].layer[IN_BLOCK].elapse_time;
-            total_time += blk_metrics[OP_WRITE][cycle][i].layer[IN_DRIVER].elapse_time;
-            total_cnt += blk_metrics[OP_WRITE][cycle][i].total_cnt;
-        }
-        value = total_time / total_cnt;
-    } else if (!strcmp(file->f_path.dentry->d_iname, "bio_write_max_time")) {
-        value = 0;
-        for (i = 0; i < IO_SIZE_MAX; i++) {
-            value = (value > blk_metrics[OP_WRITE][cycle][i].max_time) ?
-                      value : blk_metrics[OP_WRITE][cycle][i].max_time;
-        }
-    } else if (!strcmp(file->f_path.dentry->d_iname, "bio_write_4k_blk_avg_time")) {
-        value = blk_metrics[OP_WRITE][cycle][IO_SIZE_0_TO_4K].layer[IN_BLOCK].elapse_time /
-                blk_metrics[OP_WRITE][cycle][IO_SIZE_0_TO_4K].total_cnt;
-    } else if (!strcmp(file->f_path.dentry->d_iname, "bio_write_4k_blk_max_time")) {
-        value = blk_metrics[OP_WRITE][cycle][IO_SIZE_0_TO_4K].layer[IN_BLOCK].max_time;
-    } else if (!strcmp(file->f_path.dentry->d_iname, "bio_write_4k_blk_lat_dist")) {
-        for (i = 0; i <= LAT_500M_TO_MAX; i++) {
-            seq_printf(seq_filp, "%llu,", atomic64_read(&blk_metrics_lat_write_4k_in_blk[i]));
-        }
-        seq_printf(seq_filp, "\n");
-        return 0;
-    } else if (!strcmp(file->f_path.dentry->d_iname, "bio_write_4k_drv_avg_time")) {
-        value = blk_metrics[OP_WRITE][cycle][IO_SIZE_0_TO_4K].layer[IN_DRIVER].elapse_time /
-                blk_metrics[OP_WRITE][cycle][IO_SIZE_0_TO_4K].total_cnt;
-    } else if (!strcmp(file->f_path.dentry->d_iname, "bio_write_4k_drv_max_time")) {
-        value = blk_metrics[OP_WRITE][cycle][IO_SIZE_0_TO_4K].layer[IN_DRIVER].max_time;
-    } else if (!strcmp(file->f_path.dentry->d_iname, "bio_write_4k_drv_lat_dist")) {
-        for (i = 0; i <= LAT_500M_TO_MAX; i++) {
-            seq_printf(seq_filp, "%llu,", atomic64_read(&blk_metrics_lat_write_4k_in_drv[i]));
-        }
-        seq_printf(seq_filp, "\n");
-        return 0;
-    } else if (!strcmp(file->f_path.dentry->d_iname, "bio_write_512k_blk_avg_time")) {
-        value = blk_metrics[OP_WRITE][cycle][IO_SIZE_512K_TO_MAX].layer[IN_BLOCK].elapse_time /
-                blk_metrics[OP_WRITE][cycle][IO_SIZE_512K_TO_MAX].total_cnt;
-    } else if (!strcmp(file->f_path.dentry->d_iname, "bio_write_512k_blk_max_time")) {
-        value = blk_metrics[OP_WRITE][cycle][IO_SIZE_512K_TO_MAX].layer[IN_BLOCK].max_time;
-    } else if (!strcmp(file->f_path.dentry->d_iname, "bio_write_512k_blk_lat_dist")) {
-        for (i = 0; i <= LAT_500M_TO_MAX; i++) {
-            seq_printf(seq_filp, "%llu,", atomic64_read(&blk_metrics_lat_write_512k_in_blk[i]));
-        }
-        seq_printf(seq_filp, "\n");
-        return 0;
-    } else if (!strcmp(file->f_path.dentry->d_iname, "bio_write_512k_drv_avg_time")) {
-        value = blk_metrics[OP_WRITE][cycle][IO_SIZE_512K_TO_MAX].layer[IN_DRIVER].elapse_time /
-                blk_metrics[OP_WRITE][cycle][IO_SIZE_512K_TO_MAX].total_cnt;
-    } else if (!strcmp(file->f_path.dentry->d_iname, "bio_write_512k_drv_max_time")) {
-        value = blk_metrics[OP_WRITE][cycle][IO_SIZE_512K_TO_MAX].layer[IN_DRIVER].max_time;
-    } else if (!strcmp(file->f_path.dentry->d_iname, "bio_write_512k_drv_lat_dist")) {
-        for (i = 0; i <= LAT_500M_TO_MAX; i++) {
-            seq_printf(seq_filp, "%llu,", atomic64_read(&blk_metrics_lat_write_512k_in_drv[i]));
-        }
-        seq_printf(seq_filp, "\n");
-        return 0;
-    }
-
-    seq_printf(seq_filp, "%llu\n", value);
-
-    return 0;
-
-err:
-    io_metrics_print("%s(%d) I don't understand what the operation: %s/%s\n",
-    current->comm,current->pid,
-    file->f_path.dentry->d_parent->d_iname, file->f_path.dentry->d_iname);
-    return -1;
+    return get_metric_value(m, node_name);
 }
 
 int block_metrics_proc_open(struct inode *inode, struct file *file)
@@ -636,31 +590,38 @@ int block_metrics_proc_open(struct inode *inode, struct file *file)
 
 void block_metrics_reset(void)
 {
-    /* 此处可以优化，如果blk_metrics_struct中有锁成员时 */
-    memset(blk_metrics, 0, OP_MAX * CYCLE_MAX * IO_SIZE_MAX
-                         * sizeof(struct blk_metrics_struct));
-    io_metrics_print("size:%lu\n", OP_MAX * CYCLE_MAX * IO_SIZE_MAX
-                              * sizeof(struct blk_metrics_struct));
-    memset(&blk_metrics_lat_read_4k_in_blk, 0, sizeof(blk_metrics_lat_read_4k_in_blk));
-    memset(&blk_metrics_lat_read_4k_in_drv, 0, sizeof(blk_metrics_lat_read_4k_in_drv));
-    memset(&blk_metrics_lat_write_4k_in_blk, 0, sizeof(blk_metrics_lat_write_4k_in_blk));
-    memset(&blk_metrics_lat_write_4k_in_drv, 0, sizeof(blk_metrics_lat_write_4k_in_drv));
-    memset(&blk_metrics_lat_read_512k_in_blk, 0, sizeof(blk_metrics_lat_read_512k_in_blk));
-    memset(&blk_metrics_lat_read_512k_in_drv, 0, sizeof(blk_metrics_lat_read_512k_in_drv));
-    memset(&blk_metrics_lat_write_512k_in_blk, 0, sizeof(blk_metrics_lat_write_512k_in_blk));
-    memset(&blk_metrics_lat_write_512k_in_drv, 0, sizeof(blk_metrics_lat_write_512k_in_drv));
+    unsigned long flags;
+    int op, size;
+
+    for (op = 0; op < OP_MAX; op++) {
+        for (size = 0; size < IO_SIZE_MAX; size++) {
+            spin_lock_irqsave(&blk_metrics_lock[op][size], flags);
+            memset(&blk_metrics[op][size], 0, sizeof(struct blk_metrics_struct));
+            spin_unlock_irqrestore(&blk_metrics_lock[op][size], flags);
+        }
+    }
+
+    io_metrics_print("Reset block metrics (size: %lu bytes)\n",
+                   (unsigned long)sizeof(blk_metrics));
+
+    memset(blk_metrics_lat_read_4k_in_blk, 0, sizeof(blk_metrics_lat_read_4k_in_blk));
+    memset(blk_metrics_lat_read_4k_in_drv, 0, sizeof(blk_metrics_lat_read_4k_in_drv));
+    memset(blk_metrics_lat_write_4k_in_blk, 0, sizeof(blk_metrics_lat_write_4k_in_blk));
+    memset(blk_metrics_lat_write_4k_in_drv, 0, sizeof(blk_metrics_lat_write_4k_in_drv));
+    memset(blk_metrics_lat_read_512k_in_blk, 0, sizeof(blk_metrics_lat_read_512k_in_blk));
+    memset(blk_metrics_lat_read_512k_in_drv, 0, sizeof(blk_metrics_lat_read_512k_in_drv));
+    memset(blk_metrics_lat_write_512k_in_blk, 0, sizeof(blk_metrics_lat_write_512k_in_blk));
+    memset(blk_metrics_lat_write_512k_in_drv, 0, sizeof(blk_metrics_lat_write_512k_in_drv));
 }
+
 
 void block_metrics_init(void)
 {
-    int i, j, k;
-
-    block_metrics_reset();
-    for (i = 0; i < OP_MAX; i++) {
-        for (j = 0; j < CYCLE_MAX; j++) {
-            for (k = 0; k < IO_SIZE_MAX; k++) {
-                spin_lock_init(&blk_metrics_lock[i][j][k]);
-            }
+    int op, size;
+    for (op = 0; op < OP_MAX; op++) {
+        for (size = 0; size < IO_SIZE_MAX; size++) {
+            spin_lock_init(&blk_metrics_lock[op][size]);
         }
     }
+    block_metrics_reset();
 }

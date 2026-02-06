@@ -14,7 +14,7 @@
 #endif
 
 #define UFS_METRICS_LAT(op)   \
-    atomic64_t ufs_metrics_lat_##op[LAT_500M_TO_MAX + 1] = {0};
+    atomic64_t ufs_metrics_lat_##op[LAT_500M_TO_MAX + 1] __cacheline_aligned = {0};
 
 #ifdef CONFIG_OPLUS_FEATURE_STORAGE_IOLATENCY_STATS
 #define TEN_SECOND_SIZE 10
@@ -38,17 +38,102 @@ bool ufs_compl_command_enabled = false;
 module_param(ufs_compl_command_enabled, bool, S_IRUGO | S_IWUSR);
 MODULE_PARM_DESC(ufs_compl_command_enabled, " Debug android_vh_ufs_compl_command");
 
-atomic64_t ufs_metrics_timestamp[CYCLE_MAX];
-
+/* UFS performance statistics structure */
 struct {
-    atomic64_t read_size;
-    atomic64_t read_cnt;
-    atomic64_t read_elapse;
-    atomic64_t write_size;
-    atomic64_t write_cnt;
-    atomic64_t write_elapse;
-    char padding[16];
-} ufs_metrics[CYCLE_MAX] = {0};
+    atomic64_t read_size;      // Total read data size
+    atomic64_t read_cnt;       // Number of read operations
+    atomic64_t read_elapse;    // Total read time (ns)
+    atomic64_t write_size;     // Total write data size
+    atomic64_t write_cnt;      // Number of write operations
+    atomic64_t write_elapse;   // Total write time (ns)
+    char padding[16];          // Cache line alignment
+} ufs_metrics __cacheline_aligned = {0};
+
+/* Metric acquisition function implementations */
+static inline u64 get_ufs_total_read_size_mb(void)
+{
+    return atomic64_read(&ufs_metrics.read_size) >> 20;
+}
+
+static inline u64 get_ufs_total_read_time_ms(void)
+{
+    return atomic64_read(&ufs_metrics.read_elapse) / NSEC_PER_MSEC;
+}
+
+static void get_ufs_read_lat_dist(struct seq_file *seq)
+{
+    int i;
+    for (i = 0; i <= LAT_500M_TO_MAX; i++) {
+        seq_printf(seq, "%llu,", atomic64_read(&ufs_metrics_lat_read[i]));
+    }
+    seq_putc(seq, '\n');
+}
+
+static inline u64 get_ufs_total_write_size_mb(void)
+{
+    return atomic64_read(&ufs_metrics.write_size) >> 20;
+}
+
+static inline u64 get_ufs_total_write_time_ms(void)
+{
+    return atomic64_read(&ufs_metrics.write_elapse) / NSEC_PER_MSEC;
+}
+
+static void get_ufs_write_lat_dist(struct seq_file *seq)
+{
+    int i;
+    for (i = 0; i <= LAT_500M_TO_MAX; i++) {
+        seq_printf(seq, "%llu,", atomic64_read(&ufs_metrics_lat_write[i]));
+    }
+    seq_putc(seq, '\n');
+}
+
+/* Define metric function types */
+typedef u64 (*metric_value_func)(void);
+typedef void (*metric_seq_func)(struct seq_file *seq);
+
+/* Define metric mapping table using anonymous structure */
+static const struct {
+    const char *name;
+    size_t name_len;
+    enum { VALUE_FUNC, SEQ_FUNC } type;
+    union {
+        metric_value_func value_func;
+        metric_seq_func seq_func;
+    } func;
+} ufs_metric_maps[] = {
+    { "ufs_total_read_size_mb",  sizeof("ufs_total_read_size_mb") - 1,  VALUE_FUNC, { .value_func = get_ufs_total_read_size_mb }  },
+    { "ufs_total_read_time_ms",  sizeof("ufs_total_read_time_ms") - 1,  VALUE_FUNC, { .value_func = get_ufs_total_read_time_ms }  },
+    { "ufs_read_lat_dist",       sizeof("ufs_read_lat_dist") - 1,       SEQ_FUNC,   { .seq_func = get_ufs_read_lat_dist }         },
+    { "ufs_total_write_size_mb", sizeof("ufs_total_write_size_mb") - 1, VALUE_FUNC, { .value_func = get_ufs_total_write_size_mb } },
+    { "ufs_total_write_time_ms", sizeof("ufs_total_write_time_ms") - 1, VALUE_FUNC, { .value_func = get_ufs_total_write_time_ms } },
+    { "ufs_write_lat_dist",      sizeof("ufs_write_lat_dist") - 1,      SEQ_FUNC,   { .seq_func = get_ufs_write_lat_dist }        },
+    { NULL, 0, 0, { .value_func = NULL } } /* Terminator */
+};
+
+/* Encapsulate metric lookup and value acquisition logic */
+static int get_metric_value(struct seq_file *seq, const char *metric_name)
+{
+    int i;
+    int metric_name_len = strlen(metric_name);
+    for (i = 0; ufs_metric_maps[i].name; i++) {
+        if (metric_name_len != ufs_metric_maps[i].name_len)
+            continue;
+
+        if (strncmp(metric_name, ufs_metric_maps[i].name, metric_name_len) == 0) {
+            if (ufs_metric_maps[i].type == VALUE_FUNC) {
+                u64 value = ufs_metric_maps[i].func.value_func();
+                seq_printf(seq, "%llu\n", value);
+            } else {
+                ufs_metric_maps[i].func.seq_func(seq);
+            }
+            return 0;
+        }
+    }
+
+    io_metrics_print("unknown metric: %s\n", metric_name);
+    return -EINVAL;
+}
 
 #ifdef CONFIG_OPLUS_FEATURE_STORAGE_IOLATENCY_STATS
 void fill_one_sec_ufs_metrics(int index, ktime_t elapsed_in_ufs, u64 size, bool rw) {
@@ -110,139 +195,108 @@ void fill_one_sec_ufs_metrics(int index, ktime_t elapsed_in_ufs, u64 size, bool 
 }
 #endif /* CONFIG_OPLUS_FEATURE_STORAGE_IOLATENCY_STATS */
 
+/* Generic function: Update UFS statistics */
+static void update_ufs_metrics(bool is_read, int transfer_len, ktime_t elapsed_in_ufs)
+{
+    u64 ufs_lat_range = 0;
+    // Do not update statistics when metrics are disabled
+    if (unlikely(!io_metrics_enabled))
+        return;
+
+    /* Directly accumulate statistics */
+    if (is_read) {
+        atomic64_inc(&ufs_metrics.read_cnt);
+        atomic64_add(transfer_len, &ufs_metrics.read_size);
+        atomic64_add(elapsed_in_ufs, &ufs_metrics.read_elapse);
+    } else {
+        atomic64_inc(&ufs_metrics.write_cnt);
+        atomic64_add(transfer_len, &ufs_metrics.write_size);
+        atomic64_add(elapsed_in_ufs, &ufs_metrics.write_elapse);
+    }
+
+    /* Update latency distribution */
+    lat_range_check(elapsed_in_ufs, ufs_lat_range);
+    if (is_read) {
+        atomic64_inc(&ufs_metrics_lat_read[ufs_lat_range]);
+    } else {
+        atomic64_inc(&ufs_metrics_lat_write[ufs_lat_range]);
+    }
+}
+
+/* UFS command completion callback function */
 void cb_android_vh_ufs_compl_command(void *ignore, struct ufs_hba *hba,
                                      struct ufshcd_lrb *lrbp)
 {
     ktime_t elapsed_in_ufs;
     int transfer_len = 0;
-    u64 ufs_lat_range = 0;
 
     if (unlikely(!io_metrics_enabled)) {
-        return ;
+        return;
     }
     if (!lrbp->cmd) {
-        goto exit;
+        return;
     }
     /*complete*/
     elapsed_in_ufs = lrbp->compl_time_stamp - lrbp->issue_time_stamp;
-    switch(lrbp->cmd->cmnd[0]) {
+    switch (lrbp->cmd->cmnd[0]) {
         case READ_6:
         case READ_10:
         case READ_16:
         {
-            int i;
-            u64 current_time_ns, elapse;
-#ifdef CONFIG_OPLUS_FEATURE_STORAGE_IOLATENCY_STATS
-            u64 elapse_s;
-#endif /* CONFIG_OPLUS_FEATURE_STORAGE_IOLATENCY_STATS */
             transfer_len = be32_to_cpu(lrbp->ucd_req_ptr->sc.exp_data_transfer_len);
-            current_time_ns = lrbp->compl_time_stamp;
 #ifdef CONFIG_OPLUS_FEATURE_STORAGE_IOLATENCY_STATS
-            elapse_s = (current_time_ns - atomic64_read(&last_sec_record)) / (1 * 1000 * 1000 * 1000);
+            u64 current_time_ns = lrbp->compl_time_stamp;
+            u64 elapse_s = (current_time_ns - atomic64_read(&last_sec_record)) / (1 * 1000 * 1000 * 1000);
             if (elapse_s >= 10) {
                 atomic64_set(&last_sec_record, current_time_ns);
-                for (i = 0; i < TEN_SECOND_SIZE; i++) {
+                for (int i = 0; i < TEN_SECOND_SIZE; i++) {
                     atomic64_set(&one_sec_ufs_metrics[i].clear_flag, 0);
                 }
                 elapse_s = 0;
             }
             fill_one_sec_ufs_metrics(elapse_s, elapsed_in_ufs, transfer_len, true);
 #endif /* CONFIG_OPLUS_FEATURE_STORAGE_IOLATENCY_STATS */
-            for (i = 0; i < CYCLE_MAX; i++) {
-                elapse = current_time_ns - atomic64_read(&ufs_metrics_timestamp[i]);
-                if (unlikely(elapse >= current_time_ns)) {
-                    atomic64_set(&ufs_metrics_timestamp[i], current_time_ns);
-                    atomic64_set(&ufs_metrics[i].read_cnt, 1);
-                    atomic64_set(&ufs_metrics[i].read_size, transfer_len);
-                    atomic64_set(&ufs_metrics[i].read_elapse, elapsed_in_ufs);
-                    elapse = 0;
-                    lat_range_check(elapsed_in_ufs, ufs_lat_range);
-                    memset(&ufs_metrics_lat_read, 0, sizeof(ufs_metrics_lat_read));
-                    atomic64_set(&ufs_metrics_lat_read[ufs_lat_range], 1);
-                } else {
-                    atomic64_inc(&ufs_metrics[i].read_cnt);
-                    atomic64_add(transfer_len, &ufs_metrics[i].read_size);
-                    atomic64_add(elapsed_in_ufs, &ufs_metrics[i].read_elapse);
-                    lat_range_check(elapsed_in_ufs, ufs_lat_range);
-                    atomic64_inc(&ufs_metrics_lat_read[ufs_lat_range]);
-                }
-                if (unlikely(elapse >= sample_cycle_config[i].cycle_value)) {
-                    /* 过期复位 */
-                    atomic64_set(&ufs_metrics_timestamp[i], 0);
-                }
-            }
+            update_ufs_metrics(true, transfer_len, elapsed_in_ufs);
             if (unlikely(ufs_compl_command_enabled || io_metrics_debug_enabled)) {
                 io_metrics_print("read %d bytes cost %llu ns\n",
                                  transfer_len, elapsed_in_ufs);
             }
-            break;
+            return;
         }
         case WRITE_6:
         case WRITE_10:
         case WRITE_16:
         {
-            int i;
-            u64 current_time_ns, elapse;
-#ifdef CONFIG_OPLUS_FEATURE_STORAGE_IOLATENCY_STATS
-            u64 elapse_s;
-#endif /* CONFIG_OPLUS_FEATURE_STORAGE_IOLATENCY_STATS */
             transfer_len = be32_to_cpu(lrbp->ucd_req_ptr->sc.exp_data_transfer_len);
-            current_time_ns = lrbp->compl_time_stamp;
 #ifdef CONFIG_OPLUS_FEATURE_STORAGE_IOLATENCY_STATS
-            elapse_s = (current_time_ns - atomic64_read(&last_sec_record)) / (1 * 1000 * 1000 * 1000);
+            u64 current_time_ns = lrbp->compl_time_stamp;
+            u64 elapse_s = (current_time_ns - atomic64_read(&last_sec_record)) / (1 * 1000 * 1000 * 1000);
             if (elapse_s >= 10) {
                 atomic64_set(&last_sec_record, current_time_ns);
-                for (i = 0; i < TEN_SECOND_SIZE; i++) {
+                for (int i = 0; i < TEN_SECOND_SIZE; i++) {
                     atomic64_set(&one_sec_ufs_metrics[i].clear_flag, 0);
                 }
                 elapse_s = 0;
             }
             fill_one_sec_ufs_metrics(elapse_s, elapsed_in_ufs, transfer_len, false);
 #endif /* CONFIG_OPLUS_FEATURE_STORAGE_IOLATENCY_STATS */
-            for (i = 0; i < CYCLE_MAX; i++) {
-                elapse = current_time_ns - atomic64_read(&ufs_metrics_timestamp[i]);
-                if (unlikely(elapse >= current_time_ns)) {
-                    atomic64_set(&ufs_metrics_timestamp[i], current_time_ns);
-                    atomic64_set(&ufs_metrics[i].write_cnt, 1);
-                    atomic64_set(&ufs_metrics[i].write_size, transfer_len);
-                    atomic64_set(&ufs_metrics[i].write_elapse, elapsed_in_ufs);
-                    elapse = 0;
-                    lat_range_check(elapsed_in_ufs, ufs_lat_range);
-                    memset(&ufs_metrics_lat_write, 0, sizeof(ufs_metrics_lat_write));
-                    atomic64_set(&ufs_metrics_lat_write[ufs_lat_range], 1);
-                } else {
-                    atomic64_inc(&ufs_metrics[i].write_cnt);
-                    atomic64_add(transfer_len, &ufs_metrics[i].write_size);
-                    atomic64_add(elapsed_in_ufs, &ufs_metrics[i].write_elapse);
-                    lat_range_check(elapsed_in_ufs, ufs_lat_range);
-                    atomic64_inc(&ufs_metrics_lat_write[ufs_lat_range]);
-                }
-                if (unlikely(elapse >= sample_cycle_config[i].cycle_value)) {
-                    /* 过期复位 */
-                    atomic64_set(&ufs_metrics_timestamp[i], 0);
-                }
-            }
+            update_ufs_metrics(false, transfer_len, elapsed_in_ufs);
             if (unlikely(ufs_compl_command_enabled || io_metrics_debug_enabled)) {
                 io_metrics_print("write %d bytes cost %llu ns\n",
                                  transfer_len, elapsed_in_ufs);
             }
-            break;
+            return;
         }
         case UNMAP:
-        {
             if (unlikely(ufs_compl_command_enabled || io_metrics_debug_enabled)) {
                 transfer_len = be32_to_cpu(lrbp->ucd_req_ptr->sc.exp_data_transfer_len);
                 io_metrics_print("unmap %d bytes cost %llu ns\n",
                                  transfer_len, elapsed_in_ufs);
             }
-            break;
-        }
+            return;
         default:
-            goto exit;
+            return;
     }
-
-exit:
-    return;
 }
 
 void ufs_register_tracepoint_probes(void)
@@ -263,19 +317,21 @@ void ufs_unregister_tracepoint_probes(void)
     return;
 }
 
+/* Handle metric queries from proc filesystem */
 static int ufs_metrics_proc_show(struct seq_file *seq_filp, void *data)
 {
-    u64 value = 123;
     struct file *file = (struct file *)seq_filp->private;
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 4, 0)
-    int i = 0;
-    enum sample_cycle_type cycle;
-#endif
-
+    const char *file_name;
     if (unlikely(!io_metrics_enabled)) {
         seq_printf(seq_filp, "io_metrics_enabled not set to 1:%d\n", io_metrics_enabled);
         return 0;
     }
+
+    if (!file)
+        return -EINVAL;
+
+    if (!file->f_path.dentry || !file->f_path.dentry->d_parent)
+        return -ENOENT;
 
     if (proc_show_enabled || unlikely(io_metrics_debug_enabled)) {
         io_metrics_print("%s(%d) read %s/%s\n",
@@ -283,51 +339,11 @@ static int ufs_metrics_proc_show(struct seq_file *seq_filp, void *data)
             file->f_path.dentry->d_iname);
     }
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 4, 0)
-    /* 确定采样周期的值（父目录） */
-    cycle = CYCLE_MAX;
-    for (i = 0; i < CYCLE_MAX; i++) {
-        if(!strcmp(file->f_path.dentry->d_parent->d_iname, sample_cycle_config[i].tag)) {
-            cycle = sample_cycle_config[i].value;
-        }
-    }
-    if (unlikely(cycle == CYCLE_MAX)) {
-        goto err;
-    }
-    if(!strcmp(file->f_path.dentry->d_iname, "ufs_total_read_size_mb")) {
-        value = atomic64_read(&ufs_metrics[cycle].read_size) >> 20;
-    } else if (!strcmp(file->f_path.dentry->d_iname, "ufs_total_read_time_ms")) {
-        /*1ns=1/(1000*1000)ms≈1/(1024*1024)ms=1>>20ms,Precision=95.1%*/
-        value = atomic64_read(&ufs_metrics[cycle].read_elapse) >> 20;
-    } else if (!strcmp(file->f_path.dentry->d_iname, "ufs_read_lat_dist")) {
-        for (i = 0; i <= LAT_500M_TO_MAX; i++) {
-            seq_printf(seq_filp, "%llu,", atomic64_read(&ufs_metrics_lat_read[i]));
-        }
-        seq_printf(seq_filp, "\n");
-        return 0;
-    } else if (!strcmp(file->f_path.dentry->d_iname, "ufs_total_write_size_mb")) {
-        value = atomic64_read(&ufs_metrics[cycle].write_size) >> 20;;
-    } else if (!strcmp(file->f_path.dentry->d_iname, "ufs_total_write_time_ms")) {
-        value = atomic64_read(&ufs_metrics[cycle].write_elapse) >> 20;
-    } else if (!strcmp(file->f_path.dentry->d_iname, "ufs_write_lat_dist")) {
-        for (i = 0; i <= LAT_500M_TO_MAX; i++) {
-            seq_printf(seq_filp, "%llu,", atomic64_read(&ufs_metrics_lat_write[i]));
-        }
-        seq_printf(seq_filp, "\n");
-        return 0;
-    }
+    file_name = file->f_path.dentry->d_iname;
+    return get_metric_value(seq_filp, file_name);
 #else
-    value = 0;
-#endif
-    seq_printf(seq_filp, "%llu\n", value);
-
+    seq_printf(seq_filp, "%d\n", 0);
     return 0;
-
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 4, 0)
-err:
-    io_metrics_print("%s(%d) I don't understand what the operation: %s/%s\n",
-             current->comm,current->pid, file->f_path.dentry->d_parent->d_iname,
-             file->f_path.dentry->d_iname);
-    return -1;
 #endif
 }
 
@@ -405,21 +421,18 @@ int ioLatencyStat_proc_open(struct inode *inode, struct file *file)
 void ufs_metrics_reset(void)
 {
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 4, 0)
-    int i = 0;
+    int i;
+    atomic64_set(&ufs_metrics.read_size, 0);
+    atomic64_set(&ufs_metrics.read_cnt, 0);
+    atomic64_set(&ufs_metrics.read_elapse, 0);
+    atomic64_set(&ufs_metrics.write_size, 0);
+    atomic64_set(&ufs_metrics.write_cnt, 0);
+    atomic64_set(&ufs_metrics.write_elapse, 0);
 
-    for (i = 0; i < CYCLE_MAX; i++) {
-        atomic64_set(&ufs_metrics_timestamp[i], 0);
-        atomic64_set(&ufs_metrics[i].read_size, 0);
-        atomic64_set(&ufs_metrics[i].read_cnt, 0);
-        atomic64_set(&ufs_metrics[i].read_elapse, 0);
-        atomic64_set(&ufs_metrics[i].write_size, 0);
-        atomic64_set(&ufs_metrics[i].write_cnt, 0);
-        atomic64_set(&ufs_metrics[i].write_elapse, 0);
+    for (i = 0; i <= LAT_500M_TO_MAX; i++) {
+        atomic64_set(&ufs_metrics_lat_write[i], 0);
+        atomic64_set(&ufs_metrics_lat_read[i], 0);
     }
-    memset(&ufs_metrics_lat_write, 0, sizeof(ufs_metrics_lat_write));
-    memset(&ufs_metrics_lat_read, 0, sizeof(ufs_metrics_lat_read));
-#else
-    return;
 #endif
 }
 void ufs_metrics_init(void)

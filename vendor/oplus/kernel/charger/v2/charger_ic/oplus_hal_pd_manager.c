@@ -73,6 +73,7 @@ struct pd_manager_chip {
 	struct delayed_work bc12_wait_work;
 	struct delayed_work vconn_wait_work;
 	struct delayed_work svid_check_work;
+	struct delayed_work tcpc_complete_work;
 
 	struct oplus_mms *wired_topic;
 	struct mms_subscribe *wired_subs;
@@ -91,6 +92,7 @@ struct pd_manager_chip {
 	bool pd_svooc;
 	bool svid_completed;
 	bool cpa_support;
+	bool enable_tcpc_irq;
 	struct power_supply *batt_psy;
 };
 
@@ -253,7 +255,7 @@ static int oplus_discover_id(struct tcpc_device *tcpc_dev)
 	int ret = 0;
 
 	ret = tcpm_dpm_vdm_discover_id(tcpc_dev, NULL);
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 1, 0))
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 1, 0)) && !IS_ENABLED(CONFIG_OPLUS_PD_EXT_SUPPORT)
 	if (ret == TCP_DPM_RET_NOT_SUPPORT ||
 	    ret == TCP_DPM_RET_DENIED_WRONG_ROLE ||
 	    ret == TCPM_ERROR_PUT_EVENT) {
@@ -756,7 +758,7 @@ static int pd_tcp_notifier_call(struct notifier_block *nb, unsigned long event,
 				chip->bc12_completed = true;
 			else
 				chip->bc12_completed = false;
-			chip->bc12_ready = false;
+
 			chip->start_peripheral = false;
 			cancel_delayed_work_sync(&chip->usb_dwork);
 			chip->usb_dr = DR_DEVICE;
@@ -786,6 +788,7 @@ static int pd_tcp_notifier_call(struct notifier_block *nb, unsigned long event,
 			 * and disable device connection
 			 */
 			chip->pd_svooc = false;
+			chip->bc12_ready = false;
 			cancel_delayed_work_sync(&chip->usb_dwork);
 			chip->usb_dr = DR_IDLE;
 			schedule_delayed_work(&chip->usb_dwork, 0);
@@ -1970,6 +1973,19 @@ static void tcpc_variable_init(struct pd_manager_chip *chip)
 	chip->current_max_ma = 0;
 }
 
+static void oplus_pd_tcpc_complete_work(struct work_struct *work)
+{
+	struct delayed_work *dwork = to_delayed_work(work);
+	struct pd_manager_chip *chip = container_of(dwork, struct pd_manager_chip, tcpc_complete_work);
+
+	if (chip->tcpc != NULL) {
+		tcpc_device_irq_enable(chip->tcpc);
+		chg_info("enable tcpc_device irq");
+	}
+
+	return;
+}
+
 static int oplus_pd_manager_probe(struct platform_device *pdev)
 {
 	int ret = 0;
@@ -2050,6 +2066,8 @@ static int oplus_pd_manager_probe(struct platform_device *pdev)
 		chg_err("can't get ic index, rc=%d\n", ret);
 		goto reg_ic_err;
 	}
+	chip->enable_tcpc_irq = of_property_read_bool(node, "oplus,enable_tcpc_irq");
+	chg_info("enable_tcpc_irq:%d", chip->enable_tcpc_irq);
 
 	ic_cfg.name = node->name;
 	ic_cfg.index = ic_index;
@@ -2068,6 +2086,12 @@ static int oplus_pd_manager_probe(struct platform_device *pdev)
 	}
 	chip->batt_psy = power_supply_get_by_name("battery");
 	chip->cpa_support = oplus_cpa_support();
+
+	if (chip->enable_tcpc_irq) {
+		INIT_DELAYED_WORK(&chip->tcpc_complete_work, oplus_pd_tcpc_complete_work);
+		schedule_delayed_work(&chip->tcpc_complete_work, msecs_to_jiffies(100));
+	}
+
 out:
 	platform_set_drvdata(pdev, chip);
 	tcpc_variable_init(chip);

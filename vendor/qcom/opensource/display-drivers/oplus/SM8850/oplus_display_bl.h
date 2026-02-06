@@ -375,5 +375,6 @@ void update_pending_backlight(struct dsi_display *display, int level);
 int oplus_panel_backlight_check(struct dsi_panel *panel);
 void oplus_apollo_async_bl_frame_delay(struct dsi_panel *panel);
 void oplus_disable_bl_delay_with_frame(struct dsi_panel *panel, u32 disable_frames);
+int oplus_ae174_apl_gamma_update(struct dsi_display *display, unsigned int bl_level);
 
 #endif /* _OPLUS_DISPLAY_BL_H_ */

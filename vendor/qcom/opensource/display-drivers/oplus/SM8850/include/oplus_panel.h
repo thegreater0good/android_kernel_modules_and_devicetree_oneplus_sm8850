@@ -98,6 +98,8 @@ struct oplus_backlight_config {
 	bool global_hbm_scale_mapping;
 	bool oplus_limit_max_bl_mode;
 	u32 oplus_limit_max_bl;
+	bool oplus_limit_min_bl_mode;
+	u32 oplus_limit_min_bl;
 	bool oplus_demura2_offset_support;
 	bool need_to_set_demura2_offset;
 	u32 demura2_offset;
@@ -288,6 +290,7 @@ struct oplus_panel {
 
 	bool gamma_compensation_support;
 	int power_mode_early;
+	bool gamma_ae174_compensation_support;
 
 	/* indicates how many frames cost from aod off cmd sent to normal frame,
 	"0" means once aod off cmd sent the next frame will be normal frame */

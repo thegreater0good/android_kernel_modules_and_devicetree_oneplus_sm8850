@@ -201,13 +201,18 @@ static ssize_t proc_distance_calib_write(struct file *file, const char __user *b
 	struct magnetic_cover_info *magcvr_info = PDE_DATA(file_inode(file));
 
 	int data = 0;
-	char temp[128] = {0};
+	char temp[INPUT_BUF_SIZE] = {0};
 	int ret = -1;
 	int i = 0;
 
 	MAG_CVR_LOG("call.\n");
 	if (!magcvr_info) {
 		MAG_CVR_ERR("g_magcvr_info null\n");
+		return count;
+	}
+
+	if (count > INPUT_BUF_SIZE) {
+		MAG_CVR_ERR("input too long(max %d bytes),count=%zu\n", INPUT_BUF_SIZE, count);
 		return count;
 	}
 
@@ -334,7 +339,7 @@ static ssize_t proc_magcvr_healthinfo_write(struct file *file, const char __user
 	struct magnetic_cover_info *magcvr_info = PDE_DATA(file_inode(file));
 
 	int data = 0;
-	char temp[128] = {0};
+	char temp[INPUT_BUF_SIZE] = {0};
 	char *token = NULL;
 	char *running = NULL;
 	int ret = 0;
@@ -342,6 +347,11 @@ static ssize_t proc_magcvr_healthinfo_write(struct file *file, const char __user
 	MAG_CVR_LOG("call.\n");
 	if (!magcvr_info) {
 		MAG_CVR_ERR("g_magcvr_info null\n");
+		return count;
+	}
+
+	if (count > INPUT_BUF_SIZE) {
+		MAG_CVR_ERR("input too long(max %d bytes),count=%zu\n", INPUT_BUF_SIZE, count);
 		return count;
 	}
 

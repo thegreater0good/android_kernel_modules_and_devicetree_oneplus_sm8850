@@ -111,6 +111,7 @@ def define_oplus_ddk_modules(target, msm_target, variant):
         "//vendor/oplus/kernel/storage:storage_log",
         "//vendor/oplus/kernel/storage:ufs-oplus-dbg",
         "//vendor/oplus/kernel/storage:oplus_file_record",
+        "//vendor/oplus/kernel/storage/oplus_overlayfs:oplus_overlay",
         "//vendor/oplus/kernel/synchronize:oplus_lock_torture",
         "//vendor/oplus/kernel/synchronize:oplus_locking_strategy",
         "//vendor/oplus/kernel/touchpanel/kernelFwUpdate/bazel:oplus_bsp_fw_update",
@@ -155,6 +156,9 @@ def define_oplus_ddk_modules(target, msm_target, variant):
         "//vendor/oplus/sensor/kernel/qcom:oplus_sensor_interact",
         "//vendor/oplus/sensor/kernel/qcom:oplus_sensor_ir_core",
         "//vendor/oplus/sensor/kernel/qcom:oplus_sensor_kookong_ir_spi",
+        "//vendor/oplus/kernel/nfc:oplus_nfc",
+        "//vendor/oplus/kernel/nfc:oplus_network_nfc_thn31",
+        "//vendor/oplus/kernel/patch:oplus_patch",
     ]
 
     #conditional_build modules

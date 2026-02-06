@@ -52,7 +52,7 @@
 #undef pr_err
 #define pr_err pr_err_fb_delay
 #endif
-#define ERR_CNT 2
+#define ERR_CNT 10
 #endif /* CONFIG_OPLUS_FEATURE_MM_FEEDBACK */
 
 #define REGDUMP_PRINT_LEN 8
@@ -4983,10 +4983,14 @@ static int wcd939x_reset(struct device *dev)
 
 	rc = msm_cdc_pinctrl_select_sleep_state(wcd939x->rst_np);
 #if IS_ENABLED(CONFIG_OPLUS_FEATURE_MM_FEEDBACK)
-	dev_err_count_ratelimited_fb_delay(rc, ERR_CNT, dev, "%s: wcd sleep state request fail!\n", __func__);
 	if (rc) {
-		dev_err_not_fb(dev, "%s: wcd sleep state request fail!\n",
-				__func__);
+		if (wcd939x->mbhc == NULL) {
+			dev_err_not_fb(dev, "%s: wcd sleep state request fail! rc:%d\n",
+					__func__, rc);
+		} else {
+			dev_err_ratelimited(dev, "%s: wcd sleep state request fail!\n",
+					__func__);
+		}
 		return -EPROBE_DEFER;
 	}
 #else /* CONFIG_OPLUS_FEATURE_MM_FEEDBACK */

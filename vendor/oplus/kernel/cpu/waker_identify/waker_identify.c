@@ -113,23 +113,36 @@ void remove_rt_info_node(struct rt_info_list_node *node)
 		return;
 	pr_info("[waker_identify] %d removed", node->seed_pid);
 	list_del(&node->list_node);
-	kfree(node);
+	/*ALM 10526182
+		Dont use kvfree because you hold the rwlock
+		Release memory after we unlock the lock rt_info_rwlock, we can't use kvfree in the lock
+		because kvfree might sleep, and we can't sleep in the lock
+	*/
 }
 
 void remove_rt_info_node_by_wq(struct work_struct *wq_for_kfree)
 {
 	struct rt_info_list_node *tmp, *tmp_for_safe;
+	LIST_HEAD(to_free_list);
 
 	write_lock(&rt_info_rwlock);
 	list_for_each_entry_safe(tmp, tmp_for_safe, &rt_info_list, list_node) {
 		if (ktime_to_ms(ktime_get()) - tmp->start_ktime > DEAFAULT_HOLD_KTIME_MS) {
 			list_del(&tmp->list_node);
-			pr_info("[waker_identify] %d removed", tmp->seed_pid);
-			kfree(tmp);
+			list_add(&tmp->list_node, &to_free_list);
 		}
 	}
 	global_doing_free = 0;
 	write_unlock(&rt_info_rwlock);
+	/*ALM 10526182
+		Release memory after we unlock the lock rt_info_rwlock, we can't use kvfree in the lock
+		because kvfree might sleep, and we can't sleep in the lock
+	*/
+
+	list_for_each_entry_safe(tmp, tmp_for_safe, &to_free_list, list_node) {
+		pr_info("[waker_identify] %d removed", tmp->seed_pid);
+		kvfree(tmp);
+	}
 }
 
 static int cmp_waker_count(const void *ax, const void *bx)
@@ -381,7 +394,7 @@ static int waker_info_show(struct seq_file *m, void *v)
 	if (list_empty(&rt_info_list))
 		return -ESRCH;
 
-	page = kzalloc(RESULT_PAGE_SIZE, GFP_KERNEL);
+	page = kvzalloc(RESULT_PAGE_SIZE, GFP_KERNEL);
 
 	if (!page)
 		return -ENOMEM;
@@ -395,7 +408,7 @@ static int waker_info_show(struct seq_file *m, void *v)
 	write_unlock(&rt_info_rwlock);
 	len += snprintf(page + len, RESULT_PAGE_SIZE - len, "NULL");
 	seq_puts(m, page);
-	kfree(page);
+	kvfree(page);
 	return 0;
 
 out:
@@ -427,10 +440,15 @@ out:
 	}
 	remove_rt_info_node(tmp);
 	write_unlock(&rt_info_rwlock);
+	/*ALM 10526182
+		Release memory after we unlock the lock rt_info_rwlock, we can't use kvfree in the lock
+		because kvfree might sleep, and we can't sleep in the lock
+	*/
+	kvfree(tmp);
 	if (len > 0)
 		seq_puts(m, page);
 
-	kfree(page);
+	kvfree(page);
 
 	return 0;
 }
@@ -456,7 +474,7 @@ static int rt_info_show(struct seq_file *m, void *v)
 	ssize_t len = 0;
 
 
-	page = kzalloc(RESULT_PAGE_SIZE, GFP_KERNEL);
+	page = kvzalloc(RESULT_PAGE_SIZE, GFP_KERNEL);
 
 	if (!page)
 		return -ENOMEM;
@@ -468,7 +486,7 @@ static int rt_info_show(struct seq_file *m, void *v)
 	if (len > 0)
 		seq_puts(m, page);
 
-	kfree(page);
+	kvfree(page);
 
 	return 0;
 }
@@ -494,13 +512,13 @@ static ssize_t rt_info_proc_write(struct file *file, const char __user *buf,
 	if (ret <= 0)
 		return ret;
 
-	new_node = kzalloc(sizeof(*new_node), GFP_KERNEL);
+	new_node = kvzalloc(sizeof(*new_node), GFP_KERNEL);
 	if (!new_node)
 		return -ENOMEM;
 
 	ret = sscanf(iter, "%d;%d;%d", &pid, &in_uid, &for_wakee);
 	if (ret != 3) {
-		kfree(new_node);
+		kvfree(new_node);
 		return -EINVAL;
 	}
 
@@ -521,7 +539,8 @@ static ssize_t rt_info_proc_write(struct file *file, const char __user *buf,
 		list_add(&new_node->list_node, &rt_info_list);
 		write_unlock(&rt_info_rwlock);
 	} else {
-		kfree(new_node);
+		kvfree(new_node);
+		return -EINVAL;
 	}
 
 	if (task)
@@ -544,7 +563,7 @@ static int enable_show(struct seq_file *m, void *v)
 	ssize_t len = 0;
 
 
-	page = kzalloc(RESULT_PAGE_SIZE, GFP_KERNEL);
+	page = kvzalloc(RESULT_PAGE_SIZE, GFP_KERNEL);
 	if (!page)
 		return -ENOMEM;
 
@@ -555,7 +574,7 @@ static int enable_show(struct seq_file *m, void *v)
 	if (len > 0)
 		seq_puts(m, page);
 
-	kfree(page);
+	kvfree(page);
 
 	return 0;
 }

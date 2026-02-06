@@ -121,6 +121,7 @@ void locking_state_systrace_c(unsigned int cpu, struct task_struct *p)
 		per_cpu(prev_locking_depth, cpu) = locking_depth;
 	}
 }
+EXPORT_SYMBOL(locking_state_systrace_c);
 
 static inline bool task_inlock(struct oplus_task_struct *ots)
 {

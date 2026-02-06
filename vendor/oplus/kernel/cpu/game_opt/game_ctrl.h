@@ -95,6 +95,12 @@ void ttwu_frame_detect_hook(struct task_struct *task);
 /*----------------------------- frame detect end -----------------------------*/
 
 /*----------------------------- ch boost req start -----------------------------*/
+#define CRITICAL_TASK_NUM 2
+void get_critical_task_name(char *unityMain_name, char *unityGfxDevice_name);
+void update_ctb_pids(pid_t game_tgid, pid_t unitymain_pid, pid_t unitygfxdevice_pid);
+bool get_ctb_enable(void);
+bool get_htb_enable(void);
+
 enum CH_BOOST_ACTION {
 	CT_REQUSET_BOOST,
 	CT_RELEASE_BOOST,

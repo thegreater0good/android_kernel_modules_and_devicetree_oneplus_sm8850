@@ -3698,6 +3698,7 @@
 			"qcom,mdss-dsi-nolp-command", "qcom,mdss-dsi-aod-off-pwm-mode2-command",
 			"qcom,mdss-dsi-timing-switch-command", "qcom,mdss-dsi-timming-switch-pwm-mode2-command";
 	oplus,cmdq-sync-support;
+	oplus,gamma-compensation-support;
 	/* SPR CONFIG */
 	qcom,spr-pack-type = "pentile";
 };

@@ -28,6 +28,14 @@ def generate_ack_abi(args, ack, output_dir):
     return process, generate_abi_aarch64_oplus
 
 
+def check_btf_data(args, ack, vmlinux, output_dir):
+    btf_h = "{}/btf_{}.h".format(output_dir, ack)
+    btf_h_command = "{} btf dump file {} format c > {}".format(args.bpftool, vmlinux, btf_h)
+    process = subprocess.Popen(btf_h_command, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    print("btf_h_command {}".format(btf_h_command))
+    return process, btf_h_command
+
+
 def dump_modversions(ack_path, ko_modversions_full):
     ko_files = find_ko_files(ack_path)
     command = "modprobe --dump-modversions {} *.ko to {}".format(ack_path, ko_modversions_full)
@@ -53,6 +61,8 @@ def generate_abis_modversions(args, acks, output_dir):
         ko_modversions_full = "{}/ko_modversions_full.txt".format(ack_path)
         if os.path.exists(ack_vmlinux):
             process, command = generate_ack_abi(args, ack, ack_path)
+            processes.append((process, command))
+            process, command = check_btf_data(args, ack, ack_vmlinux, ack_path)
             processes.append((process, command))
 
         process, command = dump_modversions(ack_path, ko_modversions_full)
@@ -165,15 +175,18 @@ def compare_same_line_files(base_file, new_file, output_file):
         print("error", exc)
 
 
-def copy_log_files_to_dest(src, dest, exclude_patterns=None):
+def copy_log_files_to_dest(src=None, dest=None, exclude_patterns=None):
     print("Copy build log from {} to {} exclude{}".format(src, dest, exclude_patterns))
     print("You can find log in {} or in {} ".format(src, dest))
     print("For more information, please refer to the documentation link:")
     print("检查是否缺少符号,检查是否破坏KMI,检查是否能够进入recovery\n如需帮助,请阅读如下指导文档:")
     print("")
 
+    if src is None or dest is None:
+        return
+
     if not os.path.exists(src):
-        raise ValueError("src dir {} not exists".format(src))
+        return
 
     if not os.path.exists(dest):
         os.makedirs(dest)
@@ -408,7 +421,7 @@ def parse_cmd_args():
     parser.add_argument('--full_kernel_version', type=str, help='linux kernel full version', default="")
     parser.add_argument('--vendor', type=str, help='vendor', default="qcom")
     parser.add_argument('--extract_symbols', type=str, help='extract_symbols', default="")
-
+    parser.add_argument('-b', '--bpftool', type=str, help='bpftool', default=get_resource_path('bpftool'))
     parser.add_argument('-z', '--lz4', type=str, help='lz4 process tool', default=get_resource_path('lz4'))
     parser.add_argument('-n', '--unpack_bootimg', type=str, help='boot unpack tool',
                         default=get_resource_path('unpack_bootimg'))
@@ -701,11 +714,13 @@ def ddk_ko_check(args, output_dir):
     print("\nddk ko check end...")
 
 def symbols_crc_check(acks, output_dir):
+    btf_hashs = []
     for ack in acks:
         print("\ngenerate {} ko modversions".format(ack))
         ack_path = str(pathlib.Path(output_dir) / ack)
         ack_log = str(pathlib.Path(log_dir) / ack)
         ack_vmlinux = str(pathlib.Path(ack_path) / 'vmlinux')
+        btf_h = "{}/{}/btf_{}.h".format(output_dir, ack, ack)
 
         if not os.path.exists(ack_vmlinux):
             print("path:{} not exist ignore".format(ack_vmlinux))
@@ -752,10 +767,22 @@ def symbols_crc_check(acks, output_dir):
 
         print("check {} ko modversions".format(ack))
         compare_symbols_modversions(ko_modversions_remove_spaces, modversions_duplicates_sort, symvers_ko_result)
-        check_current_status(symvers_ko_result, ack_path, ack_log, exclude_file, False)
-
+        check_current_status(symvers_ko_result, ack_path, ack_log, exclude_file)
+        btf_hash = common.calculate_file_md5(btf_h)
+        btf_hashs.append(btf_hash)
         print("copy log to dest...")
         copy_log_files_to_dest(ack_path, ack_log, exclude_file)
+
+    unique_hashes = set(btf_hashs)
+    if len(unique_hashes) > 1:
+        print("check btf fail,you can check log in out/oplus/*ki/btf_*ki.h or LOGDIR/abi/*ki/btf_*ki.h \n"
+              "please check the md5 of btf_*ki.h is same or not.")
+        for btf_hash in unique_hashes:
+            print("btf_hash: {}\n".format(btf_hash))
+        copy_log_files_to_dest()
+    else:
+        print("check btf success...")
+
 
 
 def find_numeric_modules_filter(directory):

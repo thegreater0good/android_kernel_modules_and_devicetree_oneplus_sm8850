@@ -706,6 +706,22 @@ static void remove_mask_reclaim_proc(void)
 }
 #endif
 
+#define DEFAULT_KSWAPD_NICE	(-15)
+static void set_kswapd_nice(int nice)
+{
+	/* android use nid 0 by default */
+	pg_data_t *pgdat = NODE_DATA(0);
+
+	if (nice < MIN_NICE || nice > MAX_NICE)
+		return;
+
+	pgdat_kswapd_lock(pgdat);
+	if (pgdat->kswapd)
+		set_user_nice(pgdat->kswapd, nice);
+	pgdat_kswapd_unlock(pgdat);
+	pr_info("set kswapd nice to %d\n", nice);
+}
+
 static int __init kswapd_opt_init(void)
 {
 	int ret = 0;
@@ -738,12 +754,15 @@ static int __init kswapd_opt_init(void)
 	else
 		create_mask_reclaim_proc();
 
+	set_kswapd_nice(DEFAULT_KSWAPD_NICE);
+
 	pr_info("%s init done\n", __func__);
 	return 0;
 }
 
 static void __exit kswapd_opt_exit(void)
 {
+	set_kswapd_nice(-DEFAULT_KSWAPD_NICE);
 	remove_alloc_adjust_ctrl_proc();
 	unregister_alloc_adjust_flags();
 	unregister_kvmalloc_adjust_flags();

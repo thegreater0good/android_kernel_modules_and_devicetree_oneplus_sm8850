@@ -498,7 +498,19 @@ def apply_overlay_check(base, dtbo):
 	if dtbo > base:
 		cmd = ['ufdt_apply_overlay', base.filename, dtbo.filename, '/dev/null']
 		logging.debug(' '.join(cmd))
-		subprocess.run(cmd, check=True)
+		try:
+			subprocess.run(cmd, check=True, capture_output=True, text=True)
+		except subprocess.CalledProcessError as e:
+			# Re-raise with more context
+			raise RuntimeError(
+				'Failed to apply overlay {} to {}: {}\nCommand: {}\nStderr: {}'.format(
+					dtbo.filename, base.filename, e, ' '.join(cmd), e.stderr
+				)
+			) from e
+		except FileNotFoundError:
+			raise RuntimeError(
+				'ufdt_apply_overlay command not found. Please ensure it is installed and in PATH.'
+			)
 	else:
 		return
 
@@ -568,6 +580,14 @@ def main():
 			futures[future] = (base, dtbo, idx + 1)
 		for future in as_completed(futures):
 			base, dtbo, task_id = futures[future]
+			try:
+				future.result()  # This will raise any exception that occurred
+				logging.debug('Overlay check {}/{} passed: {} -> {}'.format(
+					task_id, total_checks, base.filename, dtbo.filename))
+			except Exception as e:
+				logging.error('Overlay check {}/{} failed: {} -> {}: {}'.format(
+					task_id, total_checks, base.filename, dtbo.filename, str(e)))
+				raise e
 
 if __name__ == "__main__":
 	main()

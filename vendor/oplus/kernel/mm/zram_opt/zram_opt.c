@@ -28,6 +28,9 @@ static struct config_oplus_bsp_zram_opt *config;
 static int g_direct_swappiness = 60;
 static int g_swappiness = 160;
 
+#define INACTIVE_FILE_PAGES_LOW_THRESHOLD (500 << 8)  //500MB
+#define INACTIVE_FILE_PAGES_LOW_SWAPPINESS (160)
+
 #ifdef CONFIG_DYNAMIC_TUNING_SWAPPINESS
 static int threshold1_vm_swappiness;
 static int threshold2_vm_swappiness;
@@ -72,10 +75,16 @@ int tune_dynamic_swappines(void)
 
 static void zo_set_swappiness(void *data, int *swappiness)
 {
+	unsigned long nr_inactive_file_pages = 0;
+	unsigned long nr_inactive_anon_pages = 0;
+
 	if (!free_zram_is_ok()) {
 		*swappiness = 0;
 		return;
 	}
+
+	nr_inactive_file_pages = global_node_page_state(NR_INACTIVE_FILE);
+	nr_inactive_anon_pages = global_node_page_state(NR_INACTIVE_ANON);
 
 	if (current_is_kswapd()) {
 #ifdef CONFIG_DYNAMIC_TUNING_SWAPPINESS
@@ -83,18 +92,27 @@ static void zo_set_swappiness(void *data, int *swappiness)
 #else
 		*swappiness = g_swappiness;
 #endif
+		/*
+		  Higher swappiness adjustment, When there are fewer inactive file pages
+		  but a larger number of inactive anonymous pages.
+		*/
+		if((*swappiness < INACTIVE_FILE_PAGES_LOW_SWAPPINESS) &&
+		    (nr_inactive_file_pages < INACTIVE_FILE_PAGES_LOW_THRESHOLD) &&
+		    (2 * nr_inactive_file_pages < nr_inactive_anon_pages))
+			*swappiness = INACTIVE_FILE_PAGES_LOW_SWAPPINESS;
+
 #ifdef CONFIG_HYBRIDSWAP_SWAPD
 	} else if (strncmp(current->comm, "hybridswapd:", sizeof("hybridswapd:") - 1) == 0) {
 		*swappiness = g_hybridswapd_swappiness;
 		if (free_swap_is_low_fp && free_swap_is_low_fp())
 			*swappiness = 0;
 #endif
-	} else
+	} else {
 		*swappiness = g_direct_swappiness;
+	}
 
 	return;
 }
-
 /* FIXME: We do not get the vendor_hook back for now, so we skip tune_inactive_ratio temporally */
 /*
 static void zo_set_inactive_ratio(void *data, unsigned long *inactive_ratio, int file)

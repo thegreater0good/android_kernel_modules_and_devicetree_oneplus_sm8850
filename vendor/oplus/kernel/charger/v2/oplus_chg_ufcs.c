@@ -558,6 +558,7 @@ struct oplus_ufcs {
 	bool fcl_trigger;
 	int third_curve_target_vbus_mv;
 	int third_curve_target_ibus_ma;
+	atomic_t cp_offline;
 };
 
 struct current_level {
@@ -3840,6 +3841,8 @@ static void oplus_ufcs_check_sw_full(struct oplus_ufcs *chip, struct puc_strateg
 				vote(chip->ufcs_disable_votable, CHG_FULL_VOTER, true, 1, false);
 				return;
 			}
+		} else {
+			chip->count.sw_full = 0;
 		}
 
 		if ((vbat_mv > normal_hw_vth)) {
@@ -3849,6 +3852,8 @@ static void oplus_ufcs_check_sw_full(struct oplus_ufcs *chip, struct puc_strateg
 				vote(chip->ufcs_disable_votable, CHG_FULL_VOTER, true, 1, false);
 				return;
 			}
+		} else {
+			chip->count.hw_full = 0;
 		}
 	} else {
 		chip->count.sw_full = 0;
@@ -6749,14 +6754,16 @@ static void oplus_ufcs_cp_online_handler_work(struct work_struct *work)
 {
 	struct oplus_ufcs *chip =
 		container_of(work, struct oplus_ufcs, cp_online_handler_work);
-	vote(chip->ufcs_disable_votable, CP_OFFLINE_VOTER, false, false, false);
+	bool cp_offline = !!atomic_read(&chip->cp_offline);
+	vote(chip->ufcs_disable_votable, CP_OFFLINE_VOTER, cp_offline, cp_offline, false);
 }
 
 static void oplus_ufcs_cp_offline_handler_work(struct work_struct *work)
 {
 	struct oplus_ufcs *chip =
 		container_of(work, struct oplus_ufcs, cp_offline_handler_work);
-	vote(chip->ufcs_disable_votable, CP_OFFLINE_VOTER, true, true, false);
+	bool cp_offline = !!atomic_read(&chip->cp_offline);
+	vote(chip->ufcs_disable_votable, CP_OFFLINE_VOTER, cp_offline, cp_offline, false);
 }
 
 static void oplus_ufcs_cp_err_handler(struct oplus_chg_ic_dev *ic_dev, void *virq_data)
@@ -6771,6 +6778,7 @@ static void oplus_ufcs_cp_online_handler(struct oplus_chg_ic_dev *ic_dev, void *
 	struct oplus_ufcs *chip = virq_data;
 
 	chg_info("%s online\n", ic_dev->manu_name);
+	atomic_set(&chip->cp_offline, 0);
 	schedule_work(&chip->cp_online_handler_work);
 }
 
@@ -6779,6 +6787,7 @@ static void oplus_ufcs_cp_offline_handler(struct oplus_chg_ic_dev *ic_dev, void 
 	struct oplus_ufcs *chip = virq_data;
 
 	chg_err("%s offline\n", ic_dev->manu_name);
+	atomic_set(&chip->cp_offline, 1);
 	schedule_work(&chip->cp_offline_handler_work);
 }
 
@@ -7943,6 +7952,7 @@ static int oplus_ufcs_probe(struct platform_device *pdev)
 	init_completion(&chip->reset_abnormal_ack);
 
 	oplus_ufcs_parse_dt(chip);
+	atomic_set(&chip->cp_offline, 0);
 	INIT_DELAYED_WORK(&chip->switch_check_work, oplus_ufcs_switch_check_work);
 	INIT_DELAYED_WORK(&chip->monitor_work, oplus_ufcs_monitor_work);
 	INIT_DELAYED_WORK(&chip->current_work, oplus_ufcs_current_work);

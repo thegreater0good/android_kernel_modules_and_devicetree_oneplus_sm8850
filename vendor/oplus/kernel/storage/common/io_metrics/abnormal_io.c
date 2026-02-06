@@ -704,7 +704,7 @@ void record_ufshcd_command(void *ignore, const char *dev_name, const char *str,
     pentry->tp.ufshcd_command.str_t = (u8)str_t;
 #else
     /* To improve performance, only record completion commands */
-    if (!strcmp(str, "complete")) {
+    if (str && (!strncmp(str, "complete", 8))) {
         pentry->tp.ufshcd_command.str_t = 1; /* UFS_CMD_COMP */
     } else {
         pentry->tp.ufshcd_command.str_t = 0XFF; /* N/A */

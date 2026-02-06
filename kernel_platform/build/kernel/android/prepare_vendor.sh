@@ -551,7 +551,9 @@ if [ -n "${ANDROID_PRODUCT_OUT}" ] && [ -n "${ANDROID_BUILD_TOP}" ]; then
   # goes through w/o any issues.
   if [ -d "${ANDROID_BUILD_TOP}/bazel-cache" ]; then
     chmod -R 0777 "${ANDROID_BUILD_TOP}/bazel-cache"
-    find "${ANDROID_BUILD_TOP}/bazel-cache" \( -name Android.mk -o -name Android.bp \) -delete
+    #ifdef OPLUS_EDIT
+    find "${ANDROID_BUILD_TOP}/bazel-cache" -maxdepth 4 \( -name "*.mk" -o -name Android.bp \) -delete
+    #end
   fi
 
   if [ -d "${ROOT_DIR}/bazel-cache" ]; then
@@ -663,6 +665,11 @@ fi
 
 # remove bazel dir to avoid build issues
 rm -rf ${ANDROID_BUILD_TOP}/kernel_platform/out/bazel
+
+if [ -f ${ANDROID_KP_OUT_DIR}/dist/vmlinux_oki ]; then
+    mv ${ANDROID_KP_OUT_DIR}/dist/vmlinux ${ANDROID_KP_OUT_DIR}/dist/vmlinux_gki
+    mv ${ANDROID_KP_OUT_DIR}/dist/vmlinux_oki ${ANDROID_KP_OUT_DIR}/dist/vmlinux
+fi
 
 if [ ! -d "${ANDROID_BUILD_TOP}/out" ];then
     mkdir -p ${ANDROID_BUILD_TOP}/out

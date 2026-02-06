@@ -22,3 +22,7 @@ cpufreq_bouncing.ko
 oplus_bsp_task_overload.ko
 oplus_mdmfeature.ko
 oplus_wq_dynamic_priority.ko
+oplus_bsp_bootmode.ko
+oplus_ftm_mode.ko
+oplusboot.ko
+oplus_charger_present.ko

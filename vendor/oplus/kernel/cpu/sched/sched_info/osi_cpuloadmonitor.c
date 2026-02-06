@@ -26,6 +26,10 @@
 #include "osi_base.h"
 #include "osi_hotthread.h"
 
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 12, 0))
+#include <linux/nodemask_types.h>
+#endif
+
 #define CPU_LOAD_TIMER_RATE 5
 #define CPU_HIGH_LOAD_THRESHOLD 4
 #define CPU_LOW_LOAD_THRESHOLD 0
@@ -763,6 +767,8 @@ static void osi_notify_cpuset(bool is_inital)
 	css_for_each_descendant_pre(child_css, cpuset_css) {
 		grp_mask = (struct cpumask *)((unsigned long long)child_css + sizeof(struct cgroup_subsys_state)
 			+ sizeof(unsigned long) + sizeof(cpumask_var_t));
+		if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 12, 0))
+			grp_mask = (struct cpumask *)((unsigned long long)grp_mask + sizeof(nodemask_t));
 		osi_debug("child css id: %d, %s, mask:%*pbl, %lx", child_css->id, child_css->cgroup->kn->name,
 			 cpumask_pr_args(grp_mask), cpumask_bits(grp_mask)[0]);
 		if (!strcmp(child_css->cgroup->kn->name, "l-background"))

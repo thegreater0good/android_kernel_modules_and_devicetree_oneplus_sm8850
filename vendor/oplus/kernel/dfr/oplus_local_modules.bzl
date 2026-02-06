@@ -37,25 +37,6 @@ def define_oplus_local_modules():
             "//vendor/oplus/kernel/boot:oplus_bsp_boot_projectinfo",
             "//soc-repo:{}/drivers/input/misc/qpnp-power-on".format(kernel_build_variant),
          ]
-    else :
-        combkey_monitor_ko_deps = [
-            "//vendor/oplus/kernel/dfr:oplus_bsp_dfr_keyevent_handler",
-            "//vendor/oplus/kernel/dfr:oplus_bsp_dfr_theia",
-            "//kernel_device_modules-{}/drivers/soc/oplus/dft/bazel:oplus_bsp_dft_kernel_fb".format(kernel_version),
-        ]
-        hung_task_enhance_ko_deps = [
-            "//vendor/oplus/kernel/dfr:oplus_bsp_dfr_theia",
-            "//kernel_device_modules-{}/drivers/soc/oplus/boot:oplus_bsp_boot_projectinfo".format(kernel_version),
-        ]
-        shutdown_detect_ko_deps = [
-            "//kernel_device_modules-{}/drivers/soc/oplus/boot:oplus_bsp_boot_projectinfo".format(kernel_version),
-        ]
-        theia_ko_deps = [
-            "//kernel_device_modules-{}/drivers/gpu/drm/mediatek/mediatek_v2:mtk_disp_notify".format(kernel_version),
-        ]
-        dump_device_info_ko_deps = []
-        dump_reason_ko_deps = []
-        pmic_watchdog_ko_deps = []
 
     define_oplus_ddk_module(
         name = "oplus_bsp_dfr_combkey_monitor",
@@ -124,7 +105,6 @@ def define_oplus_local_modules():
             "common/oplus_fdleak/oplus_fdleak_check.c",
         ]),
         conditional_defines = {
-            "mtk":  ["CONFIG_OPLUS_SYSTEM_KERNEL_MTK"],
             "qcom": ["CONFIG_OPLUS_SYSTEM_KERNEL_QCOM"],
         },
 #        header_deps = [
@@ -140,7 +120,6 @@ def define_oplus_local_modules():
             "common/oplus_saupwk/oplus_saupwk.c",
         ]),
         conditional_defines = {
-            "mtk":  ["CONFIG_OPLUS_SYSTEM_KERNEL_MTK"],
             "qcom": ["CONFIG_OPLUS_SYSTEM_KERNEL_QCOM"],
         },
         includes = ["."],
@@ -179,7 +158,6 @@ def define_oplus_local_modules():
             "common/theia/theia_send_event.c",
         ]),
         conditional_defines = {
-            "mtk":  ["CONFIG_OPLUS_MTK_DRM_GKI_NOTIFY"],
             "qcom": ["CONFIG_QCOM_PANEL_EVENT_NOTIFIER"],
         },
         includes = ["."],
@@ -194,7 +172,6 @@ def define_oplus_local_modules():
         ]),
         conditional_srcs = {
             "CONFIG_OPLUS_DDK_MTK": {
-                True:  ["mtk/mtk_shutdown_reboot/mtk_force_shutdown.c"],
                 False: ["qcom/force_shutdown/force_shutdown.c"],
             }
         },
@@ -208,7 +185,6 @@ def define_oplus_local_modules():
         ]),
         conditional_srcs = {
             "CONFIG_OPLUS_DDK_MTK": {
-                True:  ["mtk/oplus_pmic_monitor_mtk/oplus_pmic_info_get_mtk.c","mtk/oplus_pmic_monitor_mtk/main.c"],
                 False: ["qcom/qcom_pmic_monitor/oplus_pmic_info_smem.c",
                 "qcom/qcom_pmic_monitor/main.c",
                 "qcom/qcom_pmic_monitor/oplus_pmic_machine_state.c",

@@ -27,6 +27,10 @@
 #include <../kernel/oplus_cpu/sched/sched_assist/sa_common.h>
 #endif
 
+#if IS_ENABLED(CONFIG_OPLUS_FEATURE_MM_OSVELTE)
+#include "mm_osvelte/mm-config.h"
+#endif
+
 static const char *swapd_text[NR_EVENT_ITEMS] = {
 #ifdef CONFIG_HYBRIDSWAP_SWAPD
 	"swapd_wakeup",
@@ -61,6 +65,8 @@ struct hybridswapd_operations *hybridswapd_ops;
 
 DEFINE_MUTEX(reclaim_para_lock);
 DEFINE_PER_CPU(struct swapd_event_state, swapd_event_states);
+struct zram *swapd_zram;
+bool ezreclaimd_enable;
 
 extern int folio_referenced(struct folio *folio, int is_locked,
 				struct mem_cgroup *memcg, unsigned long *vm_flags);
@@ -164,7 +170,8 @@ ssize_t hybridswap_loglevel_show(struct device *dev,
 }
 
 /* Make sure the memcg is not NULL in caller */
-memcg_hybs_t *hybridswap_cache_alloc(struct mem_cgroup *memcg, bool atomic)
+memcg_hybs_t *hybridswap_cache_alloc(struct mem_cgroup *memcg, bool atomic,
+				     bool css_alloc)
 {
 	memcg_hybs_t *hybs;
 	u64 ret;
@@ -181,6 +188,8 @@ memcg_hybs_t *hybridswap_cache_alloc(struct mem_cgroup *memcg, bool atomic)
 		log_err("alloc memcg_hybs_t failed\n");
 		return NULL;
 	}
+
+	hybs->css_alloc = css_alloc;
 
 	INIT_LIST_HEAD(&hybs->score_node);
 #ifdef CONFIG_HYBRIDSWAP_CORE
@@ -217,7 +226,7 @@ static void mem_cgroup_alloc_hook(void *data, struct mem_cgroup *memcg)
 	if (memcg->android_oem_data1[0])
 		BUG();
 
-	hybridswap_cache_alloc(memcg, true);
+	hybridswap_cache_alloc(memcg, true, true);
 }
 
 static void mem_cgroup_free_hook(void *data, struct mem_cgroup *memcg)
@@ -264,12 +273,21 @@ static void mem_cgroup_css_offline_hook(void *data,
 		struct cgroup_subsys_state *css, struct mem_cgroup *memcg)
 {
 	unsigned long flags;
+	memcg_hybs_t *hybs = MEMCGRP_ITEM_DATA(memcg);
 
-	if (memcg->android_oem_data1[0]) {
+	if (hybs) {
 		spin_lock_irqsave(&score_list_lock, flags);
 		list_del_init(&MEMCGRP_ITEM(memcg, score_node));
 		spin_unlock_irqrestore(&score_list_lock, flags);
-		css_put(css);
+
+		/*
+		 * if hybs allocated after css_alloc(), then css refcount is
+		 * error without css_get(). Actually we can remove get/put in
+		 * hooks, however, for compatiable, just invokes css_put()
+		 * if alloc in css_alloc_hook().
+		 */
+		if (hybs->css_alloc)
+			css_put(css);
 	}
 }
 
@@ -740,7 +758,7 @@ static ssize_t mem_cgroup_name_write(struct kernfs_open_file *of, char *buf,
 	int len, w_len;
 
 	if (unlikely(hybp == NULL)) {
-		hybp = hybridswap_cache_alloc(memcg, false);
+		hybp = hybridswap_cache_alloc(memcg, false, false);
 		if (!hybp)
 			return -EINVAL;
 	}
@@ -781,7 +799,7 @@ static int mem_cgroup_app_score_write(struct cgroup_subsys_state *css,
 	memcg = mem_cgroup_from_css(css);
 	hybs = MEMCGRP_ITEM_DATA(memcg);
 	if (!hybs) {
-		hybs = hybridswap_cache_alloc(memcg, false);
+		hybs = hybridswap_cache_alloc(memcg, false, false);
 		if (!hybs)
 			return -EINVAL;
 	}
@@ -817,7 +835,7 @@ int mem_cgroup_app_uid_write(struct cgroup_subsys_state *css,
 	hybs = MEMCGRP_ITEM_DATA(memcg);
 
 	if (unlikely(hybs == NULL)) {
-		hybs = hybridswap_cache_alloc(memcg, false);
+		hybs = hybridswap_cache_alloc(memcg, false, false);
 		if (!hybs)
 			return -EINVAL;
 	}
@@ -1037,6 +1055,7 @@ static int hybridswap_enable(struct zram *zram)
 #endif
 
 #ifdef CONFIG_HYBRIDSWAP_CORE
+	swapd_zram = zram;
 	ret = hybridswap_core_enable();
 	if (ret)
 		goto hybridswap_core_enable_fail;
@@ -1138,6 +1157,9 @@ ssize_t hybridswap_enable_store(struct device *dev,
 int __init hybridswap_pre_init(void)
 {
 	int ret;
+#if IS_ENABLED(CONFIG_OPLUS_FEATURE_MM_OSVELTE) && IS_ENABLED(CONFIG_OPLUS_FEATURE_MM_EZRECLAIMD)
+	struct config_ezreclaimd *config;
+#endif /* CONFIG_OPLUS_FEATURE_MM_OSVELTE && CONFIG_OPLUS_FEATURE_MM_EZRECLAIMD */
 
 	INIT_LIST_HEAD(&score_head);
 	log_level = HS_LOG_INFO;
@@ -1164,8 +1186,26 @@ int __init hybridswap_pre_init(void)
 	if (!hybridswapd_ops)
 		goto error_out;
 
+#if IS_ENABLED(CONFIG_OPLUS_FEATURE_MM_OSVELTE) && IS_ENABLED(CONFIG_OPLUS_FEATURE_MM_EZRECLAIMD)
+	config = oplus_read_mm_config(module_name_ezreclaimd);
+	if (config)
+		ezreclaimd_enable = config->enable;
+	if (ezreclaimd_enable) {
+		log_info("using ezreclaimd as reclaimer\n");
+		ezr_ops_init(hybridswapd_ops);
+		goto pre_init;
+	}
+#endif /* CONFIG_OPLUS_FEATURE_MM_OSVELTE && CONFIG_OPLUS_FEATURE_MM_EZRECLAIMD */
+	log_info("using origin hybridswapd\n");
 	hybridswapd_ops_init(hybridswapd_ops);
-	hybridswapd_ops->pre_init();
+#if IS_ENABLED(CONFIG_OPLUS_FEATURE_MM_OSVELTE) && IS_ENABLED(CONFIG_OPLUS_FEATURE_MM_EZRECLAIMD)
+pre_init:
+#endif /* CONFIG_OPLUS_FEATURE_MM_OSVELTE && CONFIG_OPLUS_FEATURE_MM_EZRECLAIMD */
+	ret = hybridswapd_ops->pre_init();
+	if (ret) {
+		log_err("pre init failed\n");
+		goto fail_out;
+	}
 
 	ret = cgroup_add_legacy_cftypes(&memory_cgrp_subsys,
 			hybridswapd_ops->memcg_legacy_files);

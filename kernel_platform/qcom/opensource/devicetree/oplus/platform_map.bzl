@@ -29,6 +29,16 @@ _platform_map = {
             {"name": "infiniti-24863-canoe-overlay.dtbo"},
         ],
     },
+    "alor-interposer": {
+        "dtb_list": [
+            # keep sorted
+            {"name": "alor-interposer.dtb"},
+            {"name": "alor-interposer-v2.dtb"},
+        ],
+        "dtbo_list": [
+            # keep sorted
+        ],
+    },
 }
 
 def _get_dtb_lists(target, dt_overlay_supported):

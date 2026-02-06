@@ -201,6 +201,7 @@ int geas_dyn_em_update(int em_id, struct geas_perf_state em_para_cl[CLUSTER_NUM]
 
 	for_each_cluster_info(info, id) {
 		struct dynamic_energy_model *em;
+		u32 max_freq = info->max_possible_freq;
 		if (!geas_sched_dynamic_energy_model_valid(info)) {
 			pr_err("%s id %d failed \n", __func__, id);
 			return -2;
@@ -216,6 +217,7 @@ int geas_dyn_em_update(int em_id, struct geas_perf_state em_para_cl[CLUSTER_NUM]
 		for (j = 0; j < dem->nr_freq; j++) {
 			int index, index_end;
 			em->states[j] = em_para_cl[info->id][j];
+			em->states[j].frequency = min(em->states[j].frequency, max_freq);
 			index_end = freq_to_index(em->states[j].frequency);
 			index_end = min(max(em->size - 1, 0), index_end);
 			for (index = index_start; index <= index_end; index++) {

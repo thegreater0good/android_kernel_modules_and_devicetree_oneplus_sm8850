@@ -29,12 +29,16 @@ int hmbird_common_lookup_symbols(void)
 #else
 int hmbird_common_lookup_symbols(void) { return 0; }
 #endif
-
+int hmbird_prepare_and_check(void);
 static int __init hmbird_common_init(void)
 {
+	if (hmbird_prepare_and_check() < 0) {
+		pr_err("hmbird: sched_ext[init] hmbird_prepare_and_check failed\n");
+		return -1;
+	}
 	if (!(HMBIRD_EXT == get_hmbird_config_type())) {
-		pr_info("hmbird: sched_ext[init] no config dts.\n");
-		return 0;
+		pr_err("hmbird: sched_ext[init] no config dts.\n");
+		return -1;
 	}
 	hmbird_common_lookup_symbols();
 	pre_hmbird_kfunc_register();

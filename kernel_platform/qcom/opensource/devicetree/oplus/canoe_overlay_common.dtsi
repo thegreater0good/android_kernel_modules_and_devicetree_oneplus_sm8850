@@ -25,6 +25,11 @@
         compatible = "dump_device_info";
         linux,contiguous-region = <&dump_device_info_mem>;
     };
+	//#ifdef OPLUS_FEATURE_KERNEL_STATE_MONITOR
+	oplus_kernel_state_monitor {
+		compatible = "oplus,kernel_state_monitor";
+	};
+	//#endif /*OPLUS_FEATURE_KERNEL_STATE_MONITOR*/
 };
 &reserved_memory {
         /*

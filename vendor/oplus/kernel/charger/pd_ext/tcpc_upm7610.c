@@ -1138,6 +1138,7 @@ static int upm7610_tcpcdev_init(struct upm7610_chip *chip, struct device *dev)
 		case TYPEC_RP_1_5:
 		case TYPEC_RP_3_0:
 			desc->rp_lvl = val;
+			break;
 		default:
 			break;
 		}
@@ -1241,7 +1242,11 @@ static inline int upm7610_check_revision(struct i2c_client *client)
 	return did;
 }
 
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 6, 0))
+static int upm7610_i2c_probe(struct i2c_client *client)
+#else
 static int upm7610_i2c_probe(struct i2c_client *client, const struct i2c_device_id *id)
+#endif
 {
 	struct upm7610_chip *chip;
 	int ret = 0, chip_id;
@@ -1309,6 +1314,17 @@ err_regmap_init:
 	return ret;
 }
 
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 6, 0))
+static void upm7610_i2c_remove(struct i2c_client *client)
+{
+	struct upm7610_chip *chip = i2c_get_clientdata(client);
+
+	if (chip) {
+		tcpc_device_unregister(chip->dev, chip->tcpc);
+		upm7610_regmap_deinit(chip);
+	}
+}
+#else
 static int upm7610_i2c_remove(struct i2c_client *client)
 {
 	struct upm7610_chip *chip = i2c_get_clientdata(client);
@@ -1320,6 +1336,7 @@ static int upm7610_i2c_remove(struct i2c_client *client)
 
 	return 0;
 }
+#endif
 
 #if CONFIG_PM
 static int upm7610_i2c_suspend(struct device *dev)

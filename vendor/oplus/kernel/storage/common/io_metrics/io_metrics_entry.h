@@ -25,7 +25,7 @@
 #include <linux/printk.h>
 
 #define io_metrics_print(fmt, arg...) \
-    printk("[IO_METRICS] [%-16s] %20s:%-4d "fmt, current->comm, __func__, __LINE__, ##arg)
+    printk("[IO_METRICS] [%-16s] [pid: %d] %20s:%-4d "fmt, current->comm, current->pid, __func__, __LINE__, ##arg)
 
 /* 统计周期 */
 enum sample_cycle_type {
@@ -55,7 +55,7 @@ enum lat_range {
     LAT_200U_TO_500U,    /* (200us, 500us]  */
     LAT_500U_TO_2M,      /* (500us, 2ms)    */
     LAT_2M_TO_20M,       /* [2ms, 20ms)     */
-    LAT_20M_TO_100M,     /* [20ms, 200ms)   */
+    LAT_20M_TO_100M,     /* [20ms, 100ms)   */
     LAT_100M_TO_500M,    /* [100ms, 500ms)  */
     LAT_500M_TO_MAX,     /* [500ms, +∞)     */
 };
@@ -90,5 +90,5 @@ struct sample_cycle {
 
 extern bool io_metrics_enabled;
 extern bool io_metrics_debug_enabled;
-
+void io_metrics_reset(void);
 #endif /* __IO_METRICS_ENTRY_H__ */

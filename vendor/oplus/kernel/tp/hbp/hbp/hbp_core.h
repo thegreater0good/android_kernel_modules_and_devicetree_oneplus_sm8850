@@ -13,6 +13,7 @@
 #include "hbp_frame.h"
 #include "hbp_power.h"
 #include "hbp_exception.h"
+#include "hbp_healthinfo.h"
 
 #if IS_ENABLED(CONFIG_DRM_PANEL_NOTIFY)
 #include <linux/soc/qcom/panel_event_notifier.h>
@@ -53,6 +54,10 @@
 
 #define SMART_GESTURE_THRESHOLD 0x0A
 #define SMART_GESTURE_LOW_VALUE 0x05
+
+#define FP_GRIP_ENABLE           1
+#define FP_GRIP_DISABLE_TIMEOUT  2
+#define FP_GRIP_DISABLE          0
 
 /* bit operation */
 #define SET_BIT(data, flag) ((data) |= (flag))
@@ -132,6 +137,11 @@ union usr_data {
 		int level;
 		bool trusty;
 	} film;
+
+	struct {
+		void __user *info;
+		size_t info_size;
+	} health_info;
 };
 
 struct chip_info {
@@ -302,6 +312,7 @@ struct hbp_device {
 #endif
 
 	struct debug_cfg debug;
+	struct monitor_data monitor_data;
 
 	bool up_status;
 	int touch_report_num;
@@ -382,6 +393,7 @@ extern bool match_from_cmdline(struct device *dev, struct chip_info *info);
 extern void hbp_set_irq_wake(struct hbp_device *hbp_dev, bool wake);
 extern void hbp_dev_ctrl_power_reconfig(void);
 extern void hbp_dev_ctrl_hw_reset(void);
+extern void hbp_dev_healthinfo_report(void *priv, char *report);
 /*
 #if 1
 request_firmware_select()

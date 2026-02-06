@@ -80,6 +80,7 @@ static const struct proc_ops __name ## _proc_ops = {			\
 	.proc_release	= single_release,				\
 }
 
+static int boost_pool_nr_pages(struct boost_pool *boost_pool);
 int boost_pool_mgr_init(void);
 
 static inline
@@ -130,14 +131,23 @@ out:
 	return page;
 }
 
+static int mml_cnt;
+
 struct page *boost_pool_fetch(struct boost_pool *boost_pool, int order_index)
 {
 	struct page *page;
 	struct boost_page_pool *pool = boost_pool->pools[order_index];
 
+	if (boost_pool->mml &&
+	    boost_pool_nr_pages(boost_pool) > boost_pool->min - boost_pool->mml) {
+		++mml_cnt;
+		goto fetch_page;
+	}
+
 	if (boost_pool->custom_pid && current->tgid != boost_pool->custom_pid)
 		return NULL;
 
+fetch_page:
 	page = boost_page_pool_remove(pool, POOL_HIGHPAGE);
 	if (!page)
 		page = boost_page_pool_remove(pool, POOL_LOWPAGE);
@@ -710,6 +720,7 @@ struct boost_pool *boost_pool_create(const char *name, bool smmu_v3_enable)
 	struct proc_dir_entry *proc_root;
 	struct proc_dir_entry *proc_low, *proc_min, *proc_alloc,
 			      *proc_cpu, *proc_custom_pid;
+	bool uncached;
 
 	ret = boost_pool_mgr_init();
 	if (ret)
@@ -726,6 +737,9 @@ struct boost_pool *boost_pool_create(const char *name, bool smmu_v3_enable)
 	boost_pool = kzalloc(sizeof(struct boost_pool), GFP_KERNEL);
 	if (!boost_pool)
 		return NULL;
+
+	if (name)
+		uncached = strstr(name, "uncached") != NULL;
 
 	if (boost_pool_create_pools(boost_pool->pools))
 		goto free_pool;
@@ -775,6 +789,8 @@ struct boost_pool *boost_pool_create(const char *name, bool smmu_v3_enable)
 	boost_pool->min = nr_pages;
 	boost_pool->low = nr_pages;
 	boost_pool->alloc = nr_pages;
+	if (!uncached)
+		boost_pool->mml = SZ_64M >> PAGE_SHIFT;
 
 	mutex_init(&boost_pool->prefill_lock);
 	init_waitqueue_head(&boost_pool->waitq);
@@ -846,6 +862,9 @@ static int dump_show(struct seq_file *s, void *unused)
 			   cpumask_pr_args(boost_pool->prefill_task->cpus_ptr));
 		seq_printf(s, "    custom_pid   %d\n",
 			   boost_pool->custom_pid);
+		seq_printf(s, "    mml         %d\n",
+			   P2M(boost_pool->mml));
+		seq_printf(s, "    mml_cnt     %d\n", mml_cnt);
 
 	}
 	mutex_unlock(&pool_list_lock);

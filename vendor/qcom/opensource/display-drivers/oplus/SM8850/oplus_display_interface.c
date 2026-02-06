@@ -51,6 +51,7 @@ extern char oplus_global_hbm_flags;
 extern int dcc_flags;
 
 extern bool g_gamma_regs_read_done;
+extern bool g_gamma_inverse;
 
 static DEFINE_SPINLOCK(g_bk_lock);
 
@@ -196,6 +197,10 @@ void oplus_display_enable_pre(struct dsi_display *display)
 	oplus_apuir_init(display->panel);
 #endif
 
+	if (oplus_panel_ae174_gamma_compensation(display)) {
+		OPLUS_DSI_ERR("panel ae174 gamma compensation failed\n");
+	}
+
 	return;
 }
 
@@ -225,7 +230,7 @@ int oplus_panel_enable_pre(struct dsi_panel *panel)
 	int rc = 0;
 
 	OPLUS_DSI_INFO("oplus_panel_enable\n");
-	if (panel->oplus_panel.gamma_compensation_support && g_gamma_regs_read_done) {
+	if (panel->oplus_panel.gamma_compensation_support && g_gamma_regs_read_done && g_gamma_inverse) {
 		rc = dsi_panel_tx_cmd_set(panel, DSI_CMD_GAMMA_COMPENSATION, false);
 		if (rc) {
 			OPLUS_DSI_ERR("send DSI_CMD_GAMMA_COMPENSATION failed\n");
@@ -316,7 +321,12 @@ void oplus_panel_disable_post(struct dsi_panel *panel)
 
 void oplus_encoder_kickoff(struct drm_encoder *drm_enc, struct sde_encoder_virt *sde_enc)
 {
-	/* Add for backlight smooths */
+	return;
+}
+
+void oplus_encoder_kickoff_post(struct drm_encoder *drm_enc, struct sde_encoder_virt *sde_enc)
+{
+	/* Cmd mode panel synchronously set backlight */
 	if ((is_support_apollo_bk(sde_enc->cur_master->connector) == true) && backlight_smooth_enable && !dc_apollo_sync_hbmon(get_main_display())) {
 		if (sde_enc->num_phys_encs > 0) {
 			oplus_sync_panel_brightness(OPLUS_POST_KICKOFF_METHOD, drm_enc);
@@ -324,14 +334,11 @@ void oplus_encoder_kickoff(struct drm_encoder *drm_enc, struct sde_encoder_virt 
 	} else {
 		oplus_sync_panel_brightness_v2(drm_enc);
 	}
-	oplus_set_osc_status(drm_enc);
 
-	return;
-}
-
-void oplus_encoder_kickoff_post(struct drm_encoder *drm_enc, struct sde_encoder_virt *sde_enc)
-{
+	/* Video mode panel synchronously set backlight */
 	oplus_sync_panel_brightness_video(drm_enc);
+
+	oplus_set_osc_status(drm_enc);
 
 	return;
 }

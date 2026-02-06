@@ -69,6 +69,78 @@ const static uint16_t audi_lhbm_alpha[] = {
     4087, 4091, 4094,
 };
 
+struct lhbm_fpr_ratio_entry {
+	unsigned int min;
+	unsigned int max;
+	int r_ratio;
+	int g_ratio;
+	int b_ratio;
+};
+
+static struct lhbm_fpr_ratio_entry lhbm_fpr_ratio[] = {
+	{0, 1689, 11021, 11490, 11507},
+    {1689, 1743, 11000, 11462, 11483},
+    {1743, 1796, 10938, 11399, 11414},
+    {1797, 1851, 10873, 11343, 11362},
+    {1852, 1905, 10774, 11253, 11266},
+    {1906, 1960, 10719, 11193, 11209},
+    {1961, 2015, 10645, 11144, 11157},
+    {2016, 2070, 10580, 11050, 11061},
+    {2071, 2125, 10515, 11005, 11010},
+    {2126, 2180, 10454, 10946, 10946},
+    {2181, 2235, 10383, 10865, 10865},
+    {2236, 2290, 10324, 10816, 10820},
+    {2291, 2345, 10272, 10761, 10756},
+    {2346, 2400, 10188, 10687, 10687},
+    {2401, 2455, 10151, 10632, 10630},
+    {2456, 2510, 10096, 10583, 10579},
+    {2511, 2565, 10015, 10513, 10503},
+    {2566, 2620, 9969, 10468, 10458},
+    {2621, 2675, 9935, 10419, 10419},
+    {2676, 2730, 9861, 10342, 10335},
+    {2731, 2785, 9803, 10304, 10298},
+    {2786, 2821, 9762, 10251, 10241},
+    {2822, 2858, 9688, 10171, 10163},
+    {2859, 2894, 9627, 10119, 10115},
+    {2895, 2930, 9553, 10042, 10039},
+    {2931, 2967, 9509, 9990, 9988},
+    {2968, 3003, 9463, 9937, 9934},
+    {3004, 3040, 9389, 9860, 9858},
+    {3041, 3076, 9349, 9801, 9801},
+    {3077, 3113, 9284, 9728, 9732},
+    {3114, 3149, 9238, 9676, 9681},
+    {3150, 3186, 9185, 9623, 9626},
+    {3187, 3222, 9111, 9560, 9563},
+    {3223, 3259, 9068, 9512, 9521},
+    {3260, 3295, 8997, 9442, 9454},
+    {3296, 3332, 8960, 9393, 9403},
+    {3333, 3368, 8892, 9334, 9340},
+    {3369, 3405, 8855, 9278, 9286},
+    {3406, 3441, 8806, 9239, 9250},
+    {3442, 3478, 8747, 9173, 9183},
+    {3479, 3514, 8710, 9124, 9138},
+    {3515, 3543, 8655, 9086, 9093},
+    {3544, 3572, 8602, 9023, 9033},
+    {3573, 3600, 8568, 8978, 8990},
+    {3601, 3629, 8531, 8936, 8954},
+    {3630, 3658, 8467, 8880, 8894},
+    {3659, 3687, 8433, 8838, 8852},
+    {3688, 3716, 8377, 8779, 8791},
+    {3717, 3745, 8328, 8744, 8749},
+    {3746, 3774, 8297, 8702, 8710},
+    {3775, 3803, 8251, 8643, 8653},
+    {3804, 3832, 8207, 8608, 8623},
+    {3833, 3861, 8164, 8569, 8577},
+    {3862, 3890, 8118, 8517, 8529},
+    {3891, 3919, 8072, 8479, 8487},
+    {3920, 3948, 8041, 8440, 8448},
+    {3949, 3977, 7982, 8388, 8394},
+    {3978, 4006, 7948, 8353, 8360},
+    {4007, 4035, 7920, 8318, 8330},
+    {4036, 4064, 7877, 8262, 8276},
+    {4065, 4067, 7812, 8196, 8201},
+};
+
 enum oplus_ofp_log_level {
 	OPLUS_OFP_LOG_LEVEL_NONE = 0,
 	OPLUS_OFP_LOG_LEVEL_ERR,
@@ -191,6 +263,7 @@ struct oplus_ofp_params {
 	struct workqueue_struct *aod_off_set_wq;		/* a workqueue used to send aod off cmds to speed up aod unlocking */
 	struct work_struct aod_off_set_work;			/* a work struct used to send aod off cmds to speed up aod unlocking */
 	struct notifier_block touchpanel_event_notifier;/* add for touchpanel event notifier */
+	bool aod_layer_disappeard_bl_ready;
 	struct workqueue_struct *video_mode_aod_on_set_wq;
 	struct work_struct oplus_video_mode_30hz_aod_on_work;
 };
@@ -266,6 +339,7 @@ int oplus_ofp_set_dspp_pcc_feature(void *sde_hw_cp_cfg, void *s_crtc, bool befor
 int oplus_ofp_bypass_dspp_gamut(void *sde_hw_cp_cfg, void *s_crtc);
 int oplus_ofp_lhbm_dbv_vdc_update(void *dsi_panel, unsigned int bl_level, bool entering_lhbm);
 int oplus_ofp_lhbm_dbv_alpha_update(void *dsi_panel, unsigned int bl_level, bool entering_lhbm);
+int oplus_ofp_lhbm_ae174_pressed_gamma_update(void *dsi_panel, unsigned int bl_level, bool entering_lhbm);
 
 /* -------------------- aod -------------------- */
 void oplus_ofp_aod_display_on_set_work_handler(struct work_struct *work_item);

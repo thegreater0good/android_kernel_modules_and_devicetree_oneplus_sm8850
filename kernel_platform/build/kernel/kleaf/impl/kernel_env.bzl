@@ -162,6 +162,8 @@ def _get_build_config_inputs_impl(_subrule_ctx, *, srcs, build_config):
 _get_build_config_inputs = subrule(implementation = _get_build_config_inputs_impl)
 
 def _kernel_env_impl(ctx):
+    prebuilt_bootimage = ctx.configuration.default_shell_env.get("OPLUS_USE_PREBUILT_BOOTIMAGE", "")
+    target_build_variant = ctx.configuration.default_shell_env.get("TARGET_BUILD_VARIANT", "")
     kconfig_ext = ctx.file.kconfig_ext
     dtstree_makefile = None
     dtstree_srcs = depset()
@@ -200,6 +202,17 @@ def _kernel_env_impl(ctx):
             """.format(
             kconfig_ext = kconfig_ext.path,
         )
+
+    if prebuilt_bootimage:
+        command += """
+              export OPLUS_USE_PREBUILT_BOOTIMAGE={prebuilt_bootimage}
+            """.format(prebuilt_bootimage=prebuilt_bootimage)
+
+    if target_build_variant:
+        command += """
+              export TARGET_BUILD_VARIANT={target_build_variant}
+            """.format(target_build_variant=target_build_variant)
+
     if dtstree_makefile:
         command += """
               export DTSTREE_MAKEFILE={dtstree}

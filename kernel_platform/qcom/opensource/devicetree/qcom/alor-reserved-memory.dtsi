@@ -282,4 +282,10 @@
 		no-map;
 		reg = <0x0 0xff800000 0x0 0x600000>;
 	};
+
+	ncc_sam_wa: ncc_sam_region@ffe00000 {
+		no-map;
+		reg = <0x0 0xffe00000 0x0 0x200000>;
+	};
+
 };

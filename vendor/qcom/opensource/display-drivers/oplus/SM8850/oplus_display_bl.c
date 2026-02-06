@@ -58,7 +58,10 @@ bool oplus_temp_compensation_wait_for_vsync_set = false;
 struct oplus_apollo_bk apollo_bk;
 u32 g_oplus_save_pcc = 0;
 struct dc_apollo_pcc_sync dc_apollo;
-
+struct LCM_setting_table {
+	unsigned int count;
+	u8 *para_list;
+};
 
 int oplus_panel_parse_bl_cfg(struct dsi_panel *panel)
 {
@@ -174,6 +177,19 @@ int oplus_panel_parse_bl_cfg(struct dsi_panel *panel)
 			"oplus,hbm-max-exit-restore-gir");
 	OPLUS_DSI_INFO("oplus,hbm-max-exit-restore-gir: %s\n",
 			panel->oplus_panel.bl_cfg.hbm_max_exit_restore_gir ? "true" : "false");
+
+
+	rc = utils->read_u32(utils->data, "oplus,dsi-bl-limit-normal-min-level", &val);
+	if (rc) {
+		OPLUS_DSI_INFO("[%s] oplus,dsi-bl-limit-normal-min-level undefined, default to 1\n",
+			panel->oplus_panel.vendor_name);
+		panel->oplus_panel.bl_cfg.oplus_limit_min_bl_mode = false;
+		panel->oplus_panel.bl_cfg.oplus_limit_min_bl = 1;
+	} else {
+		panel->oplus_panel.bl_cfg.oplus_limit_min_bl_mode = true;
+		panel->oplus_panel.bl_cfg.oplus_limit_min_bl = val;
+		OPLUS_DSI_INFO("oplus,dsi-bl-limit-normal-min-level : %d\n", panel->oplus_panel.bl_cfg.oplus_limit_min_bl);
+	}
 
 	return 0;
 }
@@ -1034,6 +1050,14 @@ void oplus_panel_update_backlight(struct dsi_panel *panel,
 		ns % 1000000000);
 		pr_info("Brightness time: %s\n", brightness_time);
 	}
+
+#ifdef OPLUS_FEATURE_DISPLAY
+	if (panel->oplus_panel.bl_cfg.oplus_limit_min_bl_mode) {
+		if (bl_lvl && bl_lvl < panel->oplus_panel.bl_cfg.oplus_limit_min_bl)
+			bl_lvl = panel->oplus_panel.bl_cfg.oplus_limit_min_bl;
+	}
+#endif
+
 #ifdef OPLUS_FEATURE_DISPLAY_ADFR
 	if (oplus_adfr_osync_backlight_filter(panel, bl_lvl)) {
 		return;
@@ -1341,4 +1365,57 @@ void oplus_disable_bl_delay_with_frame(struct dsi_panel *panel, u32 disable_fram
 		}
 	}
 	return;
+}
+
+int oplus_ae174_apl_gamma_update(struct dsi_display *display, unsigned int bl_level)
+{
+	int rc = 0;
+	int i = 0;
+	unsigned int lcm_cmd_count = 0;
+	struct dsi_cmd_desc *cmds = NULL;
+	struct LCM_setting_table exit_hbm_cmd[20];
+	struct dsi_panel *panel = display->panel;
+	struct panel_ae174_gamma *ae174_gamma = get_panel_ae174_gamma();
+
+	if (!panel) {
+		OPLUS_DSI_ERR("panel is null\n");
+		return  -EINVAL;
+	}
+
+	if (!display || !display->panel || !display->panel->cur_mode || !display->panel->cur_mode->priv_info) {
+		OPLUS_DSI_ERR("Invalid params\n");
+		return  -EINVAL;
+	}
+
+	if (!panel->oplus_panel.gamma_ae174_compensation_support) {
+		OPLUS_DSI_INFO("panel gamma compensation isn't supported\n");
+		return rc;
+	}
+
+	if (panel->cur_mode->priv_info->cmd_sets[DSI_CMD_EXIT_HBM_MAX].count) {
+		cmds = panel->cur_mode->priv_info->cmd_sets[DSI_CMD_EXIT_HBM_MAX].cmds;
+		lcm_cmd_count = panel->cur_mode->priv_info->cmd_sets[DSI_CMD_EXIT_HBM_MAX].count;
+		if (lcm_cmd_count > 20 || lcm_cmd_count < 1) {
+			OPLUS_DSI_ERR("exit_hbm_cmd cmd invalid\n");
+			return  -EINVAL;
+		}
+		for (i = 0; i < lcm_cmd_count; i++) {
+			exit_hbm_cmd[i].count = cmds[i].msg.tx_len;
+			exit_hbm_cmd[i].para_list = (u8 *)cmds[i].msg.tx_buf;
+		}
+		exit_hbm_cmd[0].para_list[1] = bl_level >> 8;
+		exit_hbm_cmd[0].para_list[2] = bl_level & 0xFF;
+		exit_hbm_cmd[6].para_list[1] = ae174_gamma->a_r_gamma >> 8;
+		exit_hbm_cmd[6].para_list[2] = ae174_gamma->a_r_gamma & 0xFF;
+		exit_hbm_cmd[8].para_list[1] = ae174_gamma->a_g_gamma >> 8;
+		exit_hbm_cmd[8].para_list[2] = ae174_gamma->a_g_gamma & 0xFF;
+		exit_hbm_cmd[10].para_list[1] = ae174_gamma->a_b_gamma >> 8;
+		exit_hbm_cmd[10].para_list[2] = ae174_gamma->a_b_gamma & 0xFF;
+		exit_hbm_cmd[19].para_list[1] = ae174_gamma->elvss_reg;
+		OPLUS_DSI_INFO("r_regs=[%02X %02X] g_regs=[%02X %02X] b_regs=[%02X %02X]  bl_level %d \n",
+			exit_hbm_cmd[6].para_list[1], exit_hbm_cmd[6].para_list[2], exit_hbm_cmd[8].para_list[1],
+			exit_hbm_cmd[8].para_list[2], exit_hbm_cmd[10].para_list[1], exit_hbm_cmd[10].para_list[2], bl_level);
+	}
+
+	return rc;
 }

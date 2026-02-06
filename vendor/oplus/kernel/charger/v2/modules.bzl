@@ -36,46 +36,6 @@ conditional_ko_deps = {
             "//soc-repo:{target_variant}/arch/arm64/gunyah/gh_arm_drv",
         ],
     },
-    "CONFIG_OPLUS_CHARGER_MTK": {
-        True: [
-                "//kernel_device_modules-{}/drivers/misc/mediatek/typec/tcpc:tcpc_class".format(oplus_ddk_get_kernel_version()),
-                "//kernel_device_modules-{}/drivers/misc/mediatek/typec/tcpc:tcpc_mt6375".format(oplus_ddk_get_kernel_version()),
-                "//kernel_device_modules-{}/drivers/misc/mediatek/usb/usb20:musb_hdrc".format(oplus_ddk_get_kernel_version()),
-                "//kernel_device_modules-{}/drivers/gpu/drm/mediatek/mediatek_v2:mediatek-drm".format(oplus_ddk_get_kernel_version()),
-                "//kernel_device_modules-{}/drivers/power/supply:charger_class".format(oplus_ddk_get_kernel_version()),
-                "//kernel_device_modules-{}/drivers/power/supply:adapter_class".format(oplus_ddk_get_kernel_version()),
-                "//kernel_device_modules-{}/drivers/power/supply:mtk_charger_algorithm_class".format(oplus_ddk_get_kernel_version()),
-                "//kernel_device_modules-{}/drivers/power/supply:mt6357_battery".format(oplus_ddk_get_kernel_version()),
-                "//kernel_device_modules-{}/drivers/power/supply:mt6358_battery".format(oplus_ddk_get_kernel_version()),
-                "//kernel_device_modules-{}/drivers/power/supply:mt6375-battery".format(oplus_ddk_get_kernel_version()),
-                "//kernel_device_modules-{}/drivers/power/supply:mt6375-charger".format(oplus_ddk_get_kernel_version()),
-                "//kernel_device_modules-{}/drivers/power/supply:mt6379-battery".format(oplus_ddk_get_kernel_version()),
-                "//kernel_device_modules-{}/drivers/power/supply:mt6379-chg".format(oplus_ddk_get_kernel_version()),
-                "//kernel_device_modules-{}/drivers/power/supply:mtk_2p_charger".format(oplus_ddk_get_kernel_version()),
-                "//kernel_device_modules-{}/drivers/power/supply:mtk_battery_manager".format(oplus_ddk_get_kernel_version()),
-                "//kernel_device_modules-{}/drivers/power/supply:mtk_chg_type_det".format(oplus_ddk_get_kernel_version()),
-                "//kernel_device_modules-{}/drivers/power/supply:mtk_hvbpc".format(oplus_ddk_get_kernel_version()),
-                "//kernel_device_modules-{}/drivers/power/supply:mtk_pd_adapter".format(oplus_ddk_get_kernel_version()),
-                "//kernel_device_modules-{}/drivers/power/supply:mtk_pd_charging".format(oplus_ddk_get_kernel_version()),
-                "//kernel_device_modules-{}/drivers/power/supply:mtk_pep".format(oplus_ddk_get_kernel_version()),
-                "//kernel_device_modules-{}/drivers/power/supply:mtk_pep20".format(oplus_ddk_get_kernel_version()),
-                "//kernel_device_modules-{}/drivers/power/supply:mtk_pep40".format(oplus_ddk_get_kernel_version()),
-                "//kernel_device_modules-{}/drivers/power/supply:mtk_pep45".format(oplus_ddk_get_kernel_version()),
-                "//kernel_device_modules-{}/drivers/power/supply:mtk_pep50".format(oplus_ddk_get_kernel_version()),
-                "//kernel_device_modules-{}/drivers/power/supply:mtk_pep50p".format(oplus_ddk_get_kernel_version()),
-                "//kernel_device_modules-{}/drivers/power/supply:rt9490-charger".format(oplus_ddk_get_kernel_version()),
-                "//kernel_device_modules-{}/drivers/power/supply:rt9758-charger".format(oplus_ddk_get_kernel_version()),
-                "//kernel_device_modules-{}/drivers/power/supply:rt9759".format(oplus_ddk_get_kernel_version()),
-                "//kernel_device_modules-{}/drivers/usb/mtu3:mtu3".format(oplus_ddk_get_kernel_version()),
-                "//kernel_device_modules-{}/drivers/regulator:mt6368-regulator".format(oplus_ddk_get_kernel_version()),
-                "//kernel_device_modules-{}/drivers/gpu/drm/mediatek/mediatek_v2:mtk_disp_notify".format(oplus_ddk_get_kernel_version()),
-                "//kernel_device_modules-{}/drivers/base/magtransfer:oplus_magcvr_notify".format(oplus_ddk_get_kernel_version()),
-                "//kernel_device_modules-{}/drivers/soc/oplus/device_info:device_info".format(oplus_ddk_get_kernel_version()),
-                "//kernel_device_modules-{}/drivers/soc/oplus/boot:oplus_bsp_boot_projectinfo".format(oplus_ddk_get_kernel_version()),
-                "//kernel_device_modules-{}/drivers/misc/mediatek/boot_common:mtk_boot_common".format(oplus_ddk_get_kernel_version()),
-                "//kernel_device_modules-{}/drivers/base/kernelFwUpdate:oplus_bsp_fw_update".format(oplus_ddk_get_kernel_version()),
-        ],
-    },
     "CONFIG_OPLUS_CHG_TEST_KIT": {
         True: [
             "{target_variant}_test-kit"
@@ -130,11 +90,6 @@ conditional_hdr_deps = {
     "CONFIG_OPLUS_UFCS_CLASS": {
         True: [
             ":ufcs_class_headers"
-        ],
-    },
-    "CONFIG_OPLUS_MT6375_CHARGER": {
-        True: [
-            "//vendor/oplus/kernel/charger/bazel:oplus_chg_headers"
         ],
     },
     "CONFIG_DISABLE_OPLUS_FUNCTION": {
@@ -224,6 +179,8 @@ def define_oplus_chg_v2_module():
         "v2/oplus_chg_pps.c",
         "v2/oplus_batt_bal.c",
         "v2/oplus_chg_mutual.c",
+        "v2/oplus_reverse_chg.c",
+        "v2/oplus_chg_dual_cells_protection.c",
         "v2/gauge_ic/oplus_hal_bq27541.c",
         "v2/hal/oplus_chg_ic.c",
         "v2/hal/oplus_virtual_buck.c",
@@ -240,6 +197,7 @@ def define_oplus_chg_v2_module():
         "v2/hal/oplus_virtual_platufcs.c",
         "v2/hal/oplus_virtual_batt_bal.c",
         "v2/hal/oplus_virtual_level_shift.c",
+        "v2/hal/oplus_virtual_reverse_chg.c",
         "v2/mms/oplus_mms.c",
         "v2/mms/oplus_msg_filter.c",
         "v2/mms/oplus_mms_gauge.c",
@@ -330,24 +288,6 @@ def define_oplus_chg_v2_module():
         "CONFIG_OPLUS_PD_MANAGER_CHARGER": {
             True: [
                 "v2/charger_ic/oplus_hal_pd_manager.c"
-            ],
-        },
-        "CONFIG_OPLUS_MT6375_CHARGER": {
-            True: [
-                "v2/charger_ic/oplus_hal_mtk6895S.c",
-                "v2/charger_ic/oplus_hal_mt6375.c",
-                "v2/gauge_ic/oplus_hal_mtk_platform_gauge.c"
-            ],
-        },
-        "CONFIG_OPLUS_MT6835_CHARGER": {
-            True: [
-                "v2/charger_ic/oplus_hal_mtk6895S.c",
-                "v2/gauge_ic/oplus_hal_mtk_platform_gauge.c"
-            ],
-        },
-        "CONFIG_OPLUS_MT6379_CHARGER": {
-            True: [
-                "v2/charger_ic/oplus_hal_mtk6991V.c"
             ],
         },
         "CONFIG_OPLUS_TPS6128XD_CHARGER": {

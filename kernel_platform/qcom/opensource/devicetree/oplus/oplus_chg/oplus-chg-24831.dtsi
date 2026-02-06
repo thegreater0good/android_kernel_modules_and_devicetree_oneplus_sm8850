@@ -555,6 +555,7 @@
 					OPLUS_IC_FUNC_GAUGE_SET_THREE_LEVEL_TERM_VOLT
 					OPLUS_IC_FUNC_GAUGE_GET_BATT_SOC_CENTI
 					OPLUS_IC_FUNC_GAUGE_SET_TRUE_FCC
+					OPLUS_IC_FUNC_GAUGE_GET_SILI_SIMULATE_TERM_VOLT
 				>;
 				virqs = <
 					OPLUS_IC_VIRQ_ERR
@@ -1266,6 +1267,8 @@
 
 		oplus,target_vbus_mv = <11000>;
 		oplus,curr_max_ma = <10900>;
+		oplus,curr_max_ma_percent = <3500 /* 75% ibus */
+					     2000 /* 85% ibus */>;
 		oplus,subboard_ntc_abnormal_current = <7300>;
 		oplus,ufcs_warm_allow_vol = <4000>;
 		oplus,ufcs_warm_allow_soc = <55>;
@@ -1986,7 +1989,8 @@
 
 		oplus,target_vbus_mv = <11000>;
 		oplus,curr_max_ma = <5000>;
-
+		oplus,curr_max_ma_percent = <3500 /* 75% ibus */
+					     2000 /* 85% ibus */>;
 		oplus,pps_warm_allow_vol = <4000>;
 		oplus,pps_warm_allow_soc = <55>;
 		oplus,pps_strategy_normal_current = <5000>;
@@ -3655,6 +3659,7 @@
 	oplus_chg_plc: oplus,plc_charge {
 		compatible = "oplus,plc_charge";
 		oplus,plc_soc = <90>;
+		oplus,plc_support_timeout;
 		oplus,plc_strategy-data = <&buck_simple_strategy>;
 		oplus,plc_strategy-names = "default";
 

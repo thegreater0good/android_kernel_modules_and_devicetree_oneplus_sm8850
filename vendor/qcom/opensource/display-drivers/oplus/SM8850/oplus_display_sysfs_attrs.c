@@ -1053,7 +1053,6 @@ static ssize_t oplus_backlight_smooth_set_debug(struct kobject *obj,
 	OPLUS_DSI_INFO("oplus_backlight_smooth_set_debug = %d\n", backlight_smooth_enable);
 	return count;
 }
-
 static ssize_t oplus_get_ffc_mode_debug(struct kobject *obj,
 	struct kobj_attribute *attr, char *buf)
 {
@@ -1211,6 +1210,7 @@ static ssize_t oplus_display_set_hbm_max_debug(struct kobject *obj,
 	}
 	else {
 		if (panel->cur_mode->priv_info->cmd_sets[DSI_CMD_EXIT_HBM_MAX].count) {
+			oplus_ae174_apl_gamma_update(display, last_bl);
 			mutex_lock(&panel->panel_lock);
 			rc = dsi_panel_tx_cmd_set(panel, DSI_CMD_EXIT_HBM_MAX, false);
 			mutex_unlock(&panel->panel_lock);
@@ -2034,7 +2034,10 @@ int dsi_update_dynamic_osc_clock(void)
 {
 	struct dsi_display *display = get_main_display();
 	int rc = 0;
+
+#ifdef OPLUS_FEATURE_DISPLAY_OSC
 	int osc_clock_rate = dynamic_osc_clock;
+#endif
 
 	if (!display||!display->panel) {
 		OPLUS_DSI_ERR("display is null\n");
@@ -2060,6 +2063,7 @@ int dsi_update_dynamic_osc_clock(void)
 				DSI_CORE_CLK, DSI_CLK_ON);
 	}
 
+#ifdef OPLUS_FEATURE_DISPLAY_OSC
 	if (osc_clock_rate) {
 		if (osc_clock_rate == display->panel->oplus_panel.osc_clk_mode0_rate) {
 			rc = dsi_panel_tx_cmd_set(display->panel, DSI_CMD_OSC_CLK_MODEO0, false);
@@ -2073,6 +2077,7 @@ int dsi_update_dynamic_osc_clock(void)
 	} else {
 		OPLUS_DSI_INFO("osc clk rate is 0, not config\n");
 	}
+#endif
 
 	if (display->config.panel_mode == DSI_OP_CMD_MODE) {
 		rc = dsi_display_clk_ctrl(display->dsi_clk_handle,
@@ -2161,12 +2166,14 @@ static ssize_t oplus_display_set_dynamic_osc_clock(struct kobject *obj,
 				DSI_CORE_CLK, DSI_CLK_ON);
 	}
 
+#ifdef OPLUS_FEATURE_DISPLAY_OSC
 	if (osc_clk == 139600) {
 		rc = dsi_panel_tx_cmd_set(display->panel, DSI_CMD_OSC_CLK_MODEO0, false);
 
 	} else {
 		rc = dsi_panel_tx_cmd_set(display->panel, DSI_CMD_OSC_CLK_MODEO1, false);
 	}
+#endif
 
 	if (rc) {
 		OPLUS_DSI_ERR("Failed to configure osc dynamic clk\n");

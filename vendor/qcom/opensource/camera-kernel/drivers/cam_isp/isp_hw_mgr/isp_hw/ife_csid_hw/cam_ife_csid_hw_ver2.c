@@ -4870,7 +4870,9 @@ static bool cam_ife_csid_hw_ver2_use_master_slave_cfg(
 	struct cam_ife_csid_ver2_path_reg_info *path_reg = NULL;
 	struct cam_ife_csid_ver2_path_data *path_data;
 	struct cam_isp_resource_node    *res = NULL;
+#ifndef OPLUS_FEATURE_CAMERA_COMMON
 	struct cam_isp_resource_node    *ppp_res = NULL;
+#endif
 
 	csid_reg = (struct cam_ife_csid_ver2_reg_info *)csid_hw->core_info->csid_reg;
 	path_reg = csid_reg->path_reg[res_id];
@@ -4879,6 +4881,11 @@ static bool cam_ife_csid_hw_ver2_use_master_slave_cfg(
 
 	switch (res_id) {
 	case CAM_IFE_PIX_PATH_RES_RDI_0:
+#ifdef OPLUS_FEATURE_CAMERA_COMMON
+		if (path_reg->use_master_slave_default || path_data->path_cfg.is_aeb_en ||
+			path_data->path_cfg.sfe_shdr || csid_hw->flags.rdi_lcr_en)
+			ret = true;
+#else
 		if (path_data->path_cfg.is_aeb_en || path_data->path_cfg.sfe_shdr ||
 			csid_hw->flags.rdi_lcr_en)
 			ret = true;
@@ -4887,7 +4894,7 @@ static bool cam_ife_csid_hw_ver2_use_master_slave_cfg(
 			ppp_res = &csid_hw->path_res[CAM_IFE_PIX_PATH_RES_PPP];
 			ret = ppp_res->res_state > CAM_ISP_RESOURCE_STATE_AVAILABLE ? true : false;
 		}
-
+#endif
 		break;
 	case CAM_IFE_PIX_PATH_RES_RDI_1:
 	case CAM_IFE_PIX_PATH_RES_RDI_2:

@@ -791,6 +791,23 @@
 			spi-max-frequency = <50000000>;
 			status = "disabled";
 		};
+    
+	    qupv3_se11_2uart: qup_uart@88c000 {
+        	compatible = "qcom,msm-geni-serial-hs";
+        	reg = <0x88c000 0x4000>;
+        	#address-cells = <1>;
+        	#size-cells = <0>;
+        	reg-names = "se_phys";
+        	interrupts = <GIC_SPI 356 IRQ_TYPE_LEVEL_HIGH>;
+        	clock-names = "se-clk";
+        	clocks = <&gcc GCC_QUPV3_WRAP2_S3_CLK>;
+        	interconnect-names = "qup-core", "qup-config", "qup-memory";
+        	interconnects =
+        	<&clk_virt MASTER_QUP_CORE_2 &clk_virt SLAVE_QUP_CORE_2>,
+        	<&gem_noc MASTER_APPSS_PROC &config_noc SLAVE_QUP_2>,
+        	<&aggre2_noc MASTER_QUP_2 &mc_virt SLAVE_EBI1>;
+        	status = "disabled";
+        };
 
 		i3c6: i3c-master@88c000 {
 			compatible = "qcom,geni-i3c";

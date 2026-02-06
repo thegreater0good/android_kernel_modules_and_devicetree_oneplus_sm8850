@@ -384,7 +384,62 @@ static void dynamic_boost_pool_dec_high(struct dynamic_boost_pool *pool, int nr_
 
 	return;
 }
+#if IS_ENABLED(CONFIG_OPLUS_FEATURE_AIZEROCOPY)
+void dynamic_boost_pool_alloc_pack(struct dynamic_boost_pool *boost_pool, unsigned long *size_remaining_p,
+					unsigned int *max_order_p, struct list_head *pages_p, int *i_p,
+					struct aizerofs_dma_buf_cache *dbuf_cache, u64 *page_idx_p)
+{
+	struct page *page;
+	unsigned long alloc_sz = 0;
+	bool cached = false;
 
+	if (boost_pool == NULL)
+		return;
+
+	if (boost_pool->camera_pid && current->tgid != boost_pool->camera_pid &&
+	    dynamic_boost_pool_nr_pages(boost_pool) < boost_pool->camera_pages)
+		return;
+
+	while (*size_remaining_p > 0) {
+		/*
+		 * Avoid trying to allocate memory if the process
+		* has been killed by SIGKILL
+		*/
+		if (fatal_signal_pending(current))
+			return;
+
+		cached = false;
+		/* hook2: find pages from dbuf_cache */
+		page = get_page_from_dbuf_cache(dbuf_cache, *page_idx_p);
+		if (page) {
+			cached = true;
+			goto add_page;
+		}
+
+		page = dynamic_boost_pool_alloc(boost_pool,
+						*size_remaining_p, *max_order_p);
+		if (!page)
+			break;
+add_page:
+		list_add_tail(&page->lru, pages_p);
+		*size_remaining_p -= page_size(page);
+		/*
+		¦* hook3: All pages from sglist of dma-buf
+		¦* are added to dbuf_cache->pages
+		¦*/
+		dbuf_cache_add_pages(dbuf_cache, page, *page_idx_p);
+		*page_idx_p += compound_nr(page);
+		if (!cached){
+			alloc_sz += page_size(page);
+			*max_order_p = compound_order(page);
+		}
+		(*i_p)++;
+	}
+
+	dynamic_boost_pool_dec_high(boost_pool, alloc_sz >> PAGE_SHIFT);
+	*max_order_p = orders[0];
+}
+#else
 void dynamic_boost_pool_alloc_pack(struct dynamic_boost_pool *boost_pool, unsigned long *size_remaining_p,
 					unsigned int *max_order_p, struct list_head *pages_p, int *i_p)
 {
@@ -421,6 +476,7 @@ void dynamic_boost_pool_alloc_pack(struct dynamic_boost_pool *boost_pool, unsign
 	dynamic_boost_pool_dec_high(boost_pool, alloc_sz >> PAGE_SHIFT);
 	*max_order_p = orders[0];
 }
+#endif
 EXPORT_SYMBOL_GPL(dynamic_boost_pool_alloc_pack);
 
 static void dynamic_boost_pool_wakeup_process(struct dynamic_boost_pool *pool)

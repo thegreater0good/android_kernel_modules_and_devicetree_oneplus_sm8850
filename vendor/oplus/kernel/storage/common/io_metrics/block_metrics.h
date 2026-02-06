@@ -22,15 +22,6 @@ enum io_range {
 enum io_op_type {
     OP_READ = 0,
     OP_WRITE,
-#if 0
-    OP_RAHEAD,
-    OP_WRITE_SYNC,
-    OP_READ_META,
-    OP_WRITE_META,
-    OP_DISCARD,
-    OP_SECURE_ERASE,
-    OP_FLUSH,
-#endif
     OP_MAX
 };
 
@@ -61,8 +52,8 @@ struct blk_metrics_struct {
 
 extern bool block_rq_issue_enabled;
 extern bool block_rq_complete_enabled;
-extern struct blk_metrics_struct blk_metrics[OP_MAX][CYCLE_MAX][IO_SIZE_MAX];
-extern spinlock_t blk_metrics_lock[OP_MAX][CYCLE_MAX][IO_SIZE_MAX];
+extern struct blk_metrics_struct blk_metrics[OP_MAX][IO_SIZE_MAX];
+extern spinlock_t blk_metrics_lock[OP_MAX][IO_SIZE_MAX];
 
 void block_register_tracepoint_probes(void);
 void block_unregister_tracepoint_probes(void);

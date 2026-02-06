@@ -109,12 +109,14 @@ def define_oplus_sched_assist_local_modules():
         sched_ext_ko_deps = [
             "//vendor/oplus/kernel/cpu:oplus_bsp_sched_assist",
             "//vendor/oplus/kernel/cpu:oplus_bsp_waker_identify",
+            "//vendor/oplus/kernel/synchronize:oplus_locking_strategy",
             "//soc-repo:{}/drivers/soc/qcom/minidump".format(kernel_build_variant),
         ]
     else :
         sched_ext_ko_deps = [
             "//vendor/oplus/kernel/cpu:oplus_bsp_sched_assist",
             "//vendor/oplus/kernel/cpu:oplus_bsp_waker_identify",
+            "//vendor/oplus/kernel/synchronize:oplus_locking_strategy",
             "//kernel_device_modules-6.12/drivers/misc/mediatek/aee/mrdump:mrdump",
         ]
     define_oplus_ddk_module(

@@ -12,6 +12,7 @@
 
 int hmbird_freqgov_init(void);
 void gov_switch_state_systrace_c(void);
+unsigned int get_tl_from_perf(unsigned int cpu, u32 perf);
 
 struct heavy_boost_params{
 	int type;
