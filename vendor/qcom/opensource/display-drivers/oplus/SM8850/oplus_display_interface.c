@@ -234,7 +234,8 @@ int oplus_panel_enable_pre(struct dsi_panel *panel)
 	int rc = 0;
 
 	OPLUS_DSI_INFO("oplus_panel_enable\n");
-	if (panel->oplus_panel.gamma_compensation_support && g_gamma_regs_read_done && g_gamma_inverse) {
+	if ((panel->oplus_panel.gamma_compensation_support || panel->oplus_panel.gamma_ae174_compensation_support)
+			 && g_gamma_regs_read_done && g_gamma_inverse) {
 		rc = dsi_panel_tx_cmd_set(panel, DSI_CMD_GAMMA_COMPENSATION, false);
 		if (rc) {
 			OPLUS_DSI_ERR("send DSI_CMD_GAMMA_COMPENSATION failed\n");

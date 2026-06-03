@@ -885,6 +885,26 @@ static void sy6974b_cpa_subs_callback(struct mms_subscribe *subs,
 	}
 }
 
+static void sy6974b_subscribe_vooc_topic(struct oplus_mms *topic, void *prv_data)
+{
+	struct sy6974b_chip *chip = prv_data;
+
+	if (!chip)
+		return;
+
+	chip->vooc_topic = topic;
+	chip->vooc_subs = oplus_mms_subscribe(chip->vooc_topic, chip,
+					      oplus_vooc_subs_callback,
+					      "sy6974b");
+	if (IS_ERR_OR_NULL(chip->vooc_subs)) {
+		chg_err("subscribe vooc topic error, rc=%ld\n",
+			PTR_ERR(chip->vooc_subs));
+		return;
+	}
+
+	chip->vooc_charging = sy6974b_check_vooc_charging(chip);
+}
+
 static void sy6974b_subscribe_cpa_topic(struct oplus_mms *topic, void *prv_data)
 {
 	struct sy6974b_chip *chip = prv_data;
@@ -1362,6 +1382,46 @@ static int sy6974b_kick_wdt_func(struct oplus_chg_ic_dev *ic_dev)
 	return rc;
 }
 
+static int sy6974b_set_usbtemp_dischg_enable(struct oplus_chg_ic_dev *ic_dev, bool en)
+{
+	struct sy6974b_chip *chip;
+	int rc = 0;
+
+	if (ic_dev == NULL) {
+		chg_err("oplus_chg_ic_dev is NULL");
+		return -ENODEV;
+	}
+	chip = oplus_chg_ic_get_drvdata(ic_dev);
+	if (!chip) {
+		chg_err("chip is NULL");
+		return -ENODEV;
+	}
+
+	if (en) {
+		rc = sy6974b_disable_charger(chip);
+		if (rc < 0) {
+			chg_err("disable charger failed, rc=%d\n", rc);
+			return rc;
+		}
+	} else {
+		rc = sy6974b_enable_charger(chip);
+		if (rc < 0) {
+			chg_err("enable charger failed, rc=%d\n", rc);
+			return rc;
+		}
+	}
+
+	rc = sy6974b_write_byte_mask(chip, REG00_SY6974B_ADDRESS,
+			REG00_SY6974B_SUSPEND_MODE_MASK,
+			en ? REG00_SY6974B_SUSPEND_MODE_ENABLE : REG00_SY6974B_SUSPEND_MODE_DISABLE);
+	if (rc < 0) {
+		chg_err("sy6974b_write_byte_mask reg00 failed, rc=%d\n", rc);
+		return rc;
+	}
+
+	return 0;
+}
+
 static int sy6974b_hardware_init_func(struct oplus_chg_ic_dev *ic_dev)
 {
 	struct sy6974b_chip *chip = oplus_chg_ic_get_drvdata(ic_dev);
@@ -1487,6 +1547,10 @@ static void *oplus_chg_get_func(struct oplus_chg_ic_dev *ic_dev, enum oplus_chg_
 	case OPLUS_IC_FUNC_BUCK_KICK_WDT:
 		func = OPLUS_CHG_IC_FUNC_CHECK(OPLUS_IC_FUNC_BUCK_KICK_WDT,
 						sy6974b_kick_wdt_func);
+		break;
+	case OPLUS_IC_FUNC_SET_USB_DISCHG_ENABLE:
+		func = OPLUS_CHG_IC_FUNC_CHECK(OPLUS_IC_FUNC_SET_USB_DISCHG_ENABLE,
+						sy6974b_set_usbtemp_dischg_enable);
 		break;
 	default:
 		chg_err("this func(=%d) is not supported\n", func_id);
@@ -2715,15 +2779,27 @@ static int sy6974b_suspend(struct i2c_client *client, pm_message_t mesg)
 static void sy6974b_shutdown(struct i2c_client *client)
 {
 	int val = 0;
+	int data = 0;
+	int rc;
 	struct sy6974b_chip *chip = i2c_get_clientdata(client);
 
 	/*
 	 * HIZ mode needs to be disabled on shutdown to ensure activation
 	 * signal is available.
 	 */
-	if (READ_ONCE(chip->vbus_present))
+	if (READ_ONCE(chip->vbus_present)) {
 		sy6974b_write_byte_mask(chip, HIZ_MODE_REG, HIZ_MODE_BIT, 0);
-
+	} else {
+		/* once USBTEMP_HIGH and vbus is low*/
+		rc = sy6974b_read_byte_mask(chip, HIZ_MODE_REG, HIZ_MODE_BIT, &data);
+		if (rc < 0) {
+			chg_err("sy6974b_read_byte_mask HIZ mode failed, rc = %d\n", rc);
+		} else if (data != 0) {
+			rc = sy6974b_write_byte_mask(chip, HIZ_MODE_REG, HIZ_MODE_BIT, 0);
+			if (rc < 0)
+				chg_err("sy6974b_write_byte_mask HIZ mode failed, rc = %d\n", rc);
+		}
+	}
 	if (oplus_wired_shipmode_is_enabled()) {
 		chg_info(" enable ship mode \n");
 		val = SY6974_BATFET_OFF << REG07_SY6974B_BATFET_DIS_SHIFT;

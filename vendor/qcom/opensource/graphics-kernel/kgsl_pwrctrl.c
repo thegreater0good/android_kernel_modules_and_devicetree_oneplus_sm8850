@@ -1867,16 +1867,11 @@ static int pmqos_max_notifier_call(struct notifier_block *nb, unsigned long val,
 	pwr->pmqos_max_pwrlevel = level;
 
 	trace_kgsl_thermal_constraint(max_freq);
+	pr_info("kgsl pmqos set constraint: %s: set pmqos_max_pwrlevel to %d, freq = %u\n", __func__, level, max_freq);
 
-	/* Make sure pmqos_max_pwrlevel is updated before reading active_cnt */
-	smp_mb();
+	/* Apply the constraints only if first boot is done */
+	if (!device->ftbl->is_first_boot_done(device))
 
-	/*
-	 * Return early if the device is not active. Constraint will be applied on
-	 * subsequent boot. This will also prevent unnecessarily holding device
-	 * mutex while the device is not active.
-	 */
-	if (!atomic_read(&device->active_cnt))
 		return NOTIFY_OK;
 
 	kgsl_mutex_lock(&device->mutex);
@@ -1952,6 +1947,7 @@ static int kgsl_cooling_set_cur_state(struct thermal_cooling_device *cooling_dev
 
 	freq = pwr->pwrlevels[state].gpu_freq;
 	trace_kgsl_thermal_constraint(freq);
+	pr_info("kgsl cooling device set constraint: %s: thermal_pwrlevel = %lu, freq = %u\n", __func__, state, freq);
 	WRITE_ONCE(pwr->thermal_pwrlevel, state);
 
 	kthread_queue_work(pwr->cooling_worker, &pwr->cooling_work);

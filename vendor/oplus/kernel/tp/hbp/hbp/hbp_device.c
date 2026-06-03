@@ -348,9 +348,7 @@ static void hbp_panel_notify_callback(hbp_panel_event event, struct hbp_device *
 		/* Protect concurrent access to states[] and state_notify fields */
 		mutex_lock(&g_hbp->state_notify_mtx);
 		/* Check if same event is already processed or being processed */
-		if ((g_hbp->states[hbp_dev->id].id == hbp_dev->id &&
-		     g_hbp->states[hbp_dev->id].state == event) ||
-		    (g_hbp->state_notify_id == hbp_dev->id &&
+		if ((g_hbp->state_notify_id == hbp_dev->id &&
 		     g_hbp->state_notify_event == event)) {
 			mutex_unlock(&g_hbp->state_notify_mtx);
 			hbp_info("same screen notify event %d, ignore\n", event);

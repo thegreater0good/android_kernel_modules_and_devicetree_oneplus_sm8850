@@ -4470,6 +4470,7 @@ lim_fill_rsn_ie(struct mac_context *mac_ctx, struct pe_session *session,
 	uint8_t rsn_ie_len = 0;
 	struct wlan_crypto_pmksa pmksa, *pmksa_peer;
 	struct bss_description *bss_desc;
+	int32_t akm;
 
 	rsn_ie = qdf_mem_malloc(WLAN_MAX_IE_LEN + 2);
 	if (!rsn_ie)
@@ -4519,6 +4520,14 @@ lim_fill_rsn_ie(struct mac_context *mac_ctx, struct pe_session *session,
 	pmksa_peer = wlan_crypto_get_peer_pmksa(session->vdev, &pmksa);
 	if (pmksa_peer)
 		pe_debug("PMKSA found");
+
+	akm = wlan_crypto_get_param(session->vdev,
+				    WLAN_CRYPTO_PARAM_KEY_MGMT);
+	if (pmksa_peer && WLAN_CRYPTO_IS_WPA2(akm)) {
+		pe_debug("WPA2 does not support PMKID, clearing PMKID for AKM %d",
+			 akm);
+		qdf_mem_zero(pmksa_peer->pmkid, sizeof(pmksa_peer->pmkid));
+	}
 
 	lim_update_connect_rsn_ie(session, rsn_ie, pmksa_peer);
 	qdf_mem_free(rsn_ie);
@@ -10259,7 +10268,7 @@ static void lim_process_sme_start_beacon_req(struct mac_context *mac, uint32_t *
 	}
 }
 
-static void lim_mon_change_channel(
+static void lim_non_bss_change_channel(
 	struct mac_context *mac_ctx,
 	struct pe_session *session_entry)
 {
@@ -10284,8 +10293,9 @@ static void lim_change_channel(
 	struct mac_context *mac_ctx,
 	struct pe_session *session_entry)
 {
-	if (session_entry->bssType == eSIR_MONITOR_MODE)
-		return lim_mon_change_channel(mac_ctx, session_entry);
+	if (session_entry->bssType == eSIR_MONITOR_MODE ||
+	    session_entry->bssType == eSIR_PASSTHRU_MODE)
+		return lim_non_bss_change_channel(mac_ctx, session_entry);
 
 	mlme_set_chan_switch_in_progress(session_entry->vdev, true);
 
@@ -10433,6 +10443,37 @@ lim_update_eht_capable(struct pe_session *session, uint8_t dot11mode)
 {}
 #endif
 
+#ifdef DRIVER_PASSTHRU_MODE
+/**
+ * lim_send_passthru_channel_change_rsp() - Send Passthru channel change
+ *  response
+ * @session : pointer to PE session
+ *
+ * This function is called to send channel change response for
+ * Passthru interface when the new request matches the existing config.
+ *
+ * Return: None
+ */
+static
+void lim_send_passthru_channel_change_rsp(struct pe_session *session)
+{
+	struct scheduler_msg msg = {0};
+
+	msg.type = eWNI_SME_MONITOR_MODE_VDEV_UP;
+	msg.bodyval = session->vdev_id;
+
+	if (QDF_STATUS_SUCCESS !=
+	    scheduler_post_message(QDF_MODULE_ID_PE,
+				   QDF_MODULE_ID_SME,
+				   QDF_MODULE_ID_SME, &msg))
+		pe_err("Failed to post channel change rsp msg");
+}
+#else
+static inline
+void lim_send_passthru_channel_change_rsp(struct pe_session *session)
+{
+}
+#endif
 
 /**
  * lim_process_sme_channel_change_request() - process sme ch change req
@@ -10508,7 +10549,13 @@ static void lim_process_sme_channel_change_request(struct mac_context *mac_ctx,
 						    ch_change_req))) {
 		pe_err("Target channel and mode is same as current channel and mode channel freq %d and mode %d",
 		       session_entry->curr_op_freq, session_entry->ch_width);
-		lim_abort_channel_change(mac_ctx, ch_change_req->vdev_id);
+
+		if (LIM_IS_PASSTHRU_ROLE(session_entry))
+			lim_send_passthru_channel_change_rsp(session_entry);
+		else
+			lim_abort_channel_change(mac_ctx,
+						 ch_change_req->vdev_id);
+
 		return;
 	}
 
@@ -10544,6 +10591,7 @@ static void lim_process_sme_channel_change_request(struct mac_context *mac_ctx,
 			 session_entry->dot11mode);
 	} else if (IS_DOT11_MODE_HE(ch_change_req->dot11mode) &&
 	     (session_entry->opmode == QDF_MONITOR_MODE ||
+	      session_entry->opmode == QDF_PASSTHRU_MODE ||
 	      lim_is_session_he_capable(session_entry))) {
 		lim_update_session_he_capable_chan_switch
 			(mac_ctx, session_entry, target_freq);
@@ -10575,6 +10623,7 @@ static void lim_process_sme_channel_change_request(struct mac_context *mac_ctx,
 
 	if (IS_DOT11_MODE_EHT(ch_change_req->dot11mode) &&
 	    ((QDF_MONITOR_MODE == session_entry->opmode) ||
+	     session_entry->opmode == QDF_PASSTHRU_MODE ||
 	     lim_is_session_eht_capable(session_entry))) {
 		lim_update_session_eht_capable_chan_switch(
 				mac_ctx, session_entry, target_freq);

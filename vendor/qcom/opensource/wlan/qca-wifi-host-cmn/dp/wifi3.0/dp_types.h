@@ -5015,6 +5015,10 @@ struct dp_vdev {
 	/* Tx NSS stats received from FW */
 	struct cdp_htt_stats_tx_vdev_nss_tlv tx_vdev_nss;
 	struct dp_ul_delay_stats prev_delay_stats;
+	struct dp_ul_delay_stats ul_delay_stats[UL_DELAY_CALC_ID_MAX];
+#ifdef DRIVER_PASSTHRU_MODE
+	qdf_freq_t passthru_freq;
+#endif
 };
 
 enum {

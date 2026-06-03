@@ -2885,4 +2885,15 @@ config QCN7605_PCIE_SHADOW_REG_SUPPORT
 	bool "ENable pcie shadow register for genoa"
 	default n
 
+config DRIVER_PASSTHRU_MODE
+	bool "Enable Driver Passthrough mode"
+	default n
+
+config WONDER_SUPPORT
+	bool "Enable Wonder support"
+	depends on DRIVER_PASSTHRU_MODE
+	# Backward compatibility: passthru mode historically built wondertap pieces.
+	# Products can override to 'n' explicitly when passthru is enabled.
+	default y
+
 endif # QCA_CLD_WLAN

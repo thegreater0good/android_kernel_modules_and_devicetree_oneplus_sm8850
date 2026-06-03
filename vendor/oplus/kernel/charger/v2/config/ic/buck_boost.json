@@ -1534,6 +1534,50 @@
             }
         },
         {
+            "lable": "OPLUS_IC_FUNC_BUCK_GET_POWER_MOS_ENABLE",
+            "desc": {
+                "zh": "获取补电 pmos开关状态"
+            },
+            "auto_debug_code": true,
+            "parameter_list": ["bool *"],
+            "parameter_desc": [
+                {
+                    "range": "0-1",
+                    "type": "out",
+                    "desc": {
+                        "zh": "1: 使能, 0: 关闭"
+                    }
+                }
+            ],
+            "vict": {
+                "read": false,
+                "write": false,
+                "overwrite": false
+            }
+        },
+        {
+            "lable": "OPLUS_IC_FUNC_BUCK_SET_POWER_MOS_ENABLE",
+            "desc": {
+                "zh": "补电 pmos开关控制"
+            },
+            "auto_debug_code": true,
+            "parameter_list": ["bool"],
+            "parameter_desc": [
+                {
+                    "range": "0-1",
+                    "type": "in",
+                    "desc": {
+                        "zh": "1: 使能, 0: 关闭"
+                    }
+                }
+            ],
+            "vict": {
+                "read": false,
+                "write": false,
+                "overwrite": false
+            }
+        },
+        {
             "lable": "OPLUS_IC_FUNC_BUCK_SET_BURST_MODE",
             "desc": {
                 "zh": "设置buck的burst mode"
@@ -1630,8 +1674,66 @@
                 "write": false,
                 "overwrite": false
             }
+        },
+        {
+            "lable": "OPLUS_IC_FUNC_BUCK_GET_VDM_INFO",
+            "desc": {
+                "zh": "获取vdm info"
+            },
+            "auto_debug_code": true,
+            "parameter_list": ["u32 *", "int *"],
+            "parameter_desc": [
+                {
+                    "range": "*",
+                    "type": "out",
+                    "desc": {
+                        "zh": "vdm信息数组"
+                    }
+                },
+                {
+                    "range": "*",
+                    "type": "out",
+                    "desc": {
+                        "zh": "vdm信息数量"
+                    }
+                }
+            ],
+            "vict": {
+                "read": {
+                    "cmd": "vict -f {id} -G vic-*",
+                    "desc": {
+                        "zh": "获取vdm info"
+                    }
+                },
+                "write": false,
+                "overwrite": {
+                    "cmd": "vict -f {id} -O {val} vic-*",
+                    "desc": {
+                        "zh": "使用val覆盖vdm info"
+                    }
+                }
+            }
+        },
+        {
+            "lable": "OPLUS_IC_FUNC_BUCK_SEND_GET_SINK_CAP",
+            "desc": {
+                "zh": "发送get_sink_cap命令"
+            },
+            "auto_debug_code": true,
+            "parameter_list": [],
+            "parameter_desc": [],
+            "vict": {
+                "read": false,
+                "write": {
+                    "cmd": "vict -f {id} -S vic-*",
+                    "desc": {
+                        "zh": "N/A"
+                    }
+                },
+                "overwrite": false
+            }
         }
     ],
 
-    "version": "V6.0:59:62c8c8c4eb192fe714d79427a0e201fdd1e0d3a3d0beb25f87208b1fa1ce75b3"
+    "version": "V7.1:63:80273c984caef97203d98a6c5eed8501f6edd1c23ab316743235abeab466fa27"
 }

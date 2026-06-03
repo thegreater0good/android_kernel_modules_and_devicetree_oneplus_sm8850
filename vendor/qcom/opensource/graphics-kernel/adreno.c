@@ -851,6 +851,8 @@ static void adreno_of_get_initial_pwrlevels(struct kgsl_pwrctrl *pwr,
 
 	pwr->min_render_pwrlevel = level;
 	pwr->min_pwrlevel = level;
+
+	pr_info("kgsl initial pwrlevels: %s: min_pwrlevel = %d, default_pwrlevel = %u\n", __func__, level, pwr->default_pwrlevel);
 }
 
 static void adreno_of_get_limits(struct adreno_device *adreno_dev,
@@ -2016,6 +2018,7 @@ static int adreno_open(struct adreno_device *adreno_dev)
 		goto err;
 
 	complete_all(&device->hwaccess_gate);
+	set_bit(ADRENO_DEVICE_FIRST_BOOT_DONE, &adreno_dev->priv);
 	kgsl_pwrctrl_change_state(device, KGSL_STATE_ACTIVE);
 	adreno_active_count_put(adreno_dev);
 
@@ -2730,6 +2733,8 @@ int adreno_set_constraint(struct kgsl_device *device,
 			context->id,
 			context->pwr_constraint.type,
 			context->pwr_constraint.sub_type);
+		pr_info("kgsl user_pwrlevel_constraint: %s:  GPU_SET tid=%d level=%u\n",
+			__func__, context->tid, context->pwr_constraint.sub_type);
 		}
 		break;
 	case KGSL_CONSTRAINT_NONE: {
@@ -2738,6 +2743,8 @@ int adreno_set_constraint(struct kgsl_device *device,
 				context->id,
 				KGSL_CONSTRAINT_NONE,
 				context->pwr_constraint.sub_type);
+			pr_info("kgsl user_pwrlevel_constraint: %s:  GPU_CLEAR tid=%d prev_level=%u\n",
+				__func__, context->tid, context->pwr_constraint.sub_type);
 
 			context->pwr_constraint.type = KGSL_CONSTRAINT_NONE;
 			adreno_gmu_based_dcvs_pwr_ops(device, context->id,
@@ -2772,15 +2779,20 @@ int adreno_set_constraint(struct kgsl_device *device,
 		trace_kgsl_user_pwrlevel_constraint(device, context->id,
 			context->l3_pwr_constraint.type,
 			context->l3_pwr_constraint.sub_type);
+		pr_info("kgsl user_pwrlevel_constraint: %s:  L3_SET tid=%d level=%u\n",
+			__func__, context->tid, context->l3_pwr_constraint.sub_type);
 		}
 		break;
 	case KGSL_CONSTRAINT_L3_NONE: {
 		unsigned int type = context->l3_pwr_constraint.type;
 
-		if (type == KGSL_CONSTRAINT_L3_PWRLEVEL)
+		if (type == KGSL_CONSTRAINT_L3_PWRLEVEL) {
 			trace_kgsl_user_pwrlevel_constraint(device, context->id,
 				KGSL_CONSTRAINT_L3_NONE,
 				context->l3_pwr_constraint.sub_type);
+			pr_info("kgsl user_pwrlevel_constraint: %s:  L3_CLEAR tid=%d prev_level=%u\n",
+				__func__, context->tid, context->l3_pwr_constraint.sub_type);
+		}
 		context->l3_pwr_constraint.type = KGSL_CONSTRAINT_L3_NONE;
 		}
 		break;
@@ -3993,6 +4005,14 @@ static void adreno_set_thermal_index(struct kgsl_device *device)
 		ops->set_thermal_index(adreno_dev);
 }
 
+static bool adreno_is_first_boot_done(struct kgsl_device *device)
+{
+	struct adreno_device *adreno_dev = ADRENO_DEVICE(device);
+
+	return test_bit(ADRENO_DEVICE_FIRST_BOOT_DONE, &adreno_dev->priv);
+}
+
+
 static const struct kgsl_functable adreno_functable = {
 	/* Mandatory functions */
 	.check_idle = adreno_check_idle,
@@ -4037,6 +4057,7 @@ static const struct kgsl_functable adreno_functable = {
 	.gmu_based_dcvs_pwr_ops = adreno_gmu_based_dcvs_pwr_ops,
 	.set_thermal_index = adreno_set_thermal_index,
 	.alloc_dcvs_profile_memory = adreno_alloc_dcvs_profile_memory,
+	.is_first_boot_done = adreno_is_first_boot_done,
 };
 
 static const struct component_master_ops adreno_ops = {

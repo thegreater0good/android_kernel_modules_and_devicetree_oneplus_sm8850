@@ -889,6 +889,8 @@ enum adreno_device_flags {
 	ADRENO_DEVICE_CX_TIMER_INITIALIZED = 17,
 	/** @ADRENO_DEVICE_RESET_RECOVERY: Set if the ADRENO device under goes reset recovery */
 	ADRENO_DEVICE_RESET_RECOVERY = 18,
+	/** @ADRENO_DEVICE_FIRST_BOOT_DONE: Set if the ADRENO device first boot is done */
+	ADRENO_DEVICE_FIRST_BOOT_DONE = 19,
 };
 
 /**

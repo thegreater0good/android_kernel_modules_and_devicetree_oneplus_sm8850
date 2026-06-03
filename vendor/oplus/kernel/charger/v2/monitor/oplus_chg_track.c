@@ -194,6 +194,7 @@
 #define TRACK_FASTCHG_LOW_TEMP				0
 #define TRACK_PROTOCOL_SWITCH_COUNT			3
 #define TRACK_COOL_DOWN_TOO_SMALL			3
+#define TRACK_COOL_DOWN_TOO_SMALL_SINGLE_CELL		5
 
 #define TRACK_HIDL_DATA_LEN			512
 #define TRACK_HIDL_BCC_INFO_COUNT		8
@@ -1006,6 +1007,7 @@ struct oplus_chg_track {
 	oplus_chg_track_trigger plugout_state_trigger;
 	oplus_chg_track_trigger dual_chan_err_load_trigger;
 	oplus_chg_track_trigger usb_lpd_load_trigger;
+	oplus_chg_track_trigger cycle_current_derating_trigger;
 	struct delayed_work uisoc_load_trigger_work;
 	struct delayed_work soc_trigger_work;
 	struct delayed_work uisoc_trigger_work;
@@ -1289,6 +1291,7 @@ static struct flag_reason_table track_flag_reason_table[] = {
 	{ TRACK_NOTIFY_FLAG_CHG_SLOW_BTB_OVER_TEMP, "BtbOverTemp" },
 	{ TRACK_NOTIFY_FLAG_CHG_SLOW_R_COOLDOWN, "R_CoolDown" },
 	{ TRACK_NOTIFY_FLAG_CHG_SLOW_QUIET_MODE, "QuietModeLong" },
+	{ TRACK_NOTIFY_FLAG_CHG_SLOW_CYCLE_CURR_DERATING, "CycleCurrentDerating" },
 
 	{ TRACK_NOTIFY_FLAG_FAST_CHARGING_BREAK, "FastChgBreak" },
 	{ TRACK_NOTIFY_FLAG_GENERAL_CHARGING_BREAK, "GeneralChgBreak" },
@@ -4360,6 +4363,11 @@ oplus_chg_track_record_charger_info(struct oplus_monitor *monitor,
 	index += scnprintf(&(p_trigger_data->crux_info[index]),
 			  OPLUS_CHG_TRACK_CURX_INFO_LEN - index,
 			  "$$Boost_Mode@@%d", cv_mode ? 1 : 0);
+	if (monitor->curr_derating_trig && monitor->track)
+		index += scnprintf(&(p_trigger_data->crux_info[index]),
+			OPLUS_CHG_TRACK_CURX_INFO_LEN - index, "%s",
+			monitor->track->cycle_current_derating_trigger.crux_info);
+
 	oplus_chg_track_record_general_info(monitor, track_status, p_trigger_data, index);
 }
 
@@ -6771,6 +6779,19 @@ oplus_chg_track_cal_rechg_counts(struct oplus_monitor *monitor,
 	return 0;
 }
 
+static bool oplus_chg_track_is_cool_down_too_small(
+	const struct oplus_chg_track_status *track_status)
+{
+	int thd;
+
+	if (!track_status || !track_status->cool_down_status)
+		return false;
+
+	thd = (oplus_gauge_get_batt_num() == 1) ? TRACK_COOL_DOWN_TOO_SMALL_SINGLE_CELL :
+						  TRACK_COOL_DOWN_TOO_SMALL;
+	return track_status->cool_down_status < thd;
+}
+
 static int oplus_chg_track_cal_no_charging_stats_new(
 	struct oplus_monitor *monitor, struct oplus_chg_track_status *track_status)
 {
@@ -6787,8 +6808,7 @@ static int oplus_chg_track_cal_no_charging_stats_new(
 	delta_time = track_status->no_charging_cal_curr_time - track_status->no_charging_cal_pre_time;
 	track_status->no_charging_cal_pre_time = track_status->no_charging_cal_curr_time;
 
-	cool_down_status = track_status->cool_down_status &&
-		track_status->cool_down_status < TRACK_COOL_DOWN_TOO_SMALL;
+	cool_down_status = oplus_chg_track_is_cool_down_too_small(track_status);
 	if (monitor->batt_status == POWER_SUPPLY_STATUS_CHARGING) {
 		track_status->chg_total_time += delta_time;
 		if (monitor->ibat_ma > TRACK_NO_CHARGING_IBAT) {
@@ -9179,6 +9199,9 @@ static int oplus_chg_track_get_speed_slow_reason(
 		 track_status->power_info.power_type == TRACK_CHG_TYPE_WIRELESS)
 		chip->slow_charging_trigger.flag_reason =
 			TRACK_NOTIFY_FLAG_CHG_SLOW_VERITY_FAIL;
+	else if (chip->monitor && chip->monitor->curr_derating_trig)
+		chip->slow_charging_trigger.flag_reason =
+			TRACK_NOTIFY_FLAG_CHG_SLOW_CYCLE_CURR_DERATING;
 	else
 		chip->slow_charging_trigger.flag_reason =
 			TRACK_NOTIFY_FLAG_CHG_SLOW_OTHER;
@@ -10572,6 +10595,27 @@ static int oplus_chg_track_upload_pps_info(struct oplus_chg_track *chip)
 
 	schedule_delayed_work(&chip->pps_info_trigger_work, 0);
 	chg_info("success\n");
+	return 0;
+}
+
+static int oplus_chg_track_upload_cycle_current_derating_info(struct oplus_chg_track *track)
+{
+	union mms_msg_data data = { 0 };
+	int rc;
+
+	if (!track || !track->monitor || !track->monitor->err_topic) {
+		chg_err("invalid track/monitor/err_topic\n");
+		return -EINVAL;
+	}
+
+	rc = oplus_mms_get_item_data(track->monitor->err_topic, ERR_ITEM_CYCLE_CURRENT_DERATING, &data, false);
+	if (rc < 0) {
+		chg_err("get msg data error, rc=%d\n", rc);
+		return rc;
+	}
+	track->monitor->curr_derating_trig = true;
+	scnprintf(track->cycle_current_derating_trigger.crux_info, OPLUS_CHG_TRACK_CURX_INFO_LEN, "%s", data.strval);
+
 	return 0;
 }
 
@@ -13356,6 +13400,9 @@ static void oplus_chg_track_err_subs_callback(struct mms_subscribe *subs,
 			break;
 		case ERR_ITEM_PPS:
 			oplus_chg_track_upload_pps_info(track);
+			break;
+		case ERR_ITEM_CYCLE_CURRENT_DERATING:
+			oplus_chg_track_upload_cycle_current_derating_info(track);
 			break;
 		case ERR_ITEM_DEEP_DISCHG_INFO:
 		case ERR_ITEM_SUB_DEEP_DISCHG_INFO:

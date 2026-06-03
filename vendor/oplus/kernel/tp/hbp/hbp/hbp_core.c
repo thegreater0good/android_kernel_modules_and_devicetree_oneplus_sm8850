@@ -376,6 +376,7 @@ static void hbp_state_notify_work_handler(struct work_struct *work)
 		return;
 	}
 
+        hbp_info("state notify id %d state event %d\n", hbp->state_notify_id, hbp->state_notify_event);
 	/* Protect concurrent access to state_notify fields */
 	mutex_lock(&hbp->state_notify_mtx);
 	notify_id = hbp->state_notify_id;

@@ -575,13 +575,13 @@ enum {
 	CHIP_ID_DEFAULT = 0,
 	CHIP_ID_SC8547,
 	CHIP_ID_HL7138,
+	CHIP_ID_NU2112A,
 };
 
 enum oplus_voocphy_ovp_ctrl {
 	MASTER_CP_ID,
 	SLAVE_CP_ID,
 	INVALID_CP_ID,
-	CHIP_ID_NU2112A,
 };
 
 enum oplus_fastchg_copycat_type {
@@ -834,6 +834,7 @@ struct oplus_voocphy_manager {
 	struct batt_sys_curves *batt_sys_curv_by_tmprange;
 	unsigned char cur_sys_curv_idx;
 	int sys_curve_temp_idx;
+	int temp_region_cnt;
 
 	struct vooc_monitor_event mornitor_evt[MONITOR_EVENT_NUM];
 
@@ -949,11 +950,15 @@ struct oplus_voocphy_manager {
 	struct oplus_chg_strategy *svooc_pcc_strategy;
 	bool svooc_pcc_strategy_v2;
 
+	bool cancel_primary_switch; /* add for cancel usb switch */
+
 	bool vbus_adjust_new_method;
 	bool vbus_adjust_done;
 	bool in_vbus_adjust_trans;
 	u8 vbus_adjust_hold_cnt;
 	u8 last_vooc_vbus_status;
+	struct oplus_chg_strategy *ccd_strategy;
+	bool twice_request_current_enable;
 };
 
 struct oplus_voocphy_operations {
@@ -998,6 +1003,8 @@ struct oplus_voocphy_operations {
 	int (*get_cp_error_type)(struct oplus_voocphy_manager *chip, int *err_type);
 	bool (*ic_is_abnormal)(struct oplus_voocphy_manager *chip);
 	int (*set_sstimeout_ucp_enable)(struct oplus_voocphy_manager *chip, bool enable);
+	int (*cp_set_vac2v2x_uvp)(struct oplus_voocphy_manager *chip, bool enable);
+	int (*set_usb_dischg_enable)(struct oplus_voocphy_manager *chip, bool enable);
 };
 
 #define VOOCPHY_LOG_BUF_LEN 1024
@@ -1017,6 +1024,7 @@ struct voocphy_log_buf {
 };
 
 bool oplus_voocphy_chip_is_null(void);
+bool oplus_voocphy_slave_chip_is_null(void);
 void oplus_voocphy_slave_init(struct oplus_voocphy_manager *chip);
 void oplus_voocphy_get_chip(struct oplus_voocphy_manager **chip);
 int oplus_register_voocphy(struct oplus_voocphy_manager *chip);

@@ -2654,6 +2654,36 @@ def _define_module_for_target_variant_chipset(target, variant, chipset):
             "//build_dir/{}/linux-{}/dataipa-{}:{}_{}_ipam".format(tgt, board, ipa_ver, target, variant),
         ]
 
+    deps = deps + select({
+        ":wonder_enabled": [
+	    # Add dependency of wonder here
+	    "//vendor/qcom/proprietary/wlan/noship/passthru-test-suite-internal:{}_passthru_test".format(tv),
+	    "//vendor/qcom/proprietary/wlan/noship/passthru-test-suite-internal:passthru_test_headers",
+        ],
+        "//conditions:default": [],
+    })
+
+    wonder_srcs = "wonder_srcs_{}".format(tvc)
+    native.filegroup(
+        name = wonder_srcs,
+        # Controlled via Kconfig symbol CONFIG_WONDER_SUPPORT (see conditional_srcs below)
+        srcs = [
+            "core/hdd/src/wlan_hdd_wondertap.c",
+        ],
+        visibility = ["//visibility:private"],
+    )
+
+    combined_conditional_srcs = dict(_conditional_srcs)
+    wonder_kcfg_key = "CONFIG_WONDER_SUPPORT"
+    existing_inner = combined_conditional_srcs.get(wonder_kcfg_key, {})
+    existing_true_list = existing_inner.get(True, [])
+    existing_true_list = existing_true_list + [
+            ":{}".format(wonder_srcs),
+    ]
+    existing_inner = dict(existing_inner)
+    existing_inner[True] = existing_true_list
+    combined_conditional_srcs[wonder_kcfg_key] = existing_inner
+
     print("name=", name)
     print("hw=", hw)
     print("ipaths=", ipaths)
@@ -2674,7 +2704,7 @@ def _define_module_for_target_variant_chipset(target, variant, chipset):
         #ifdef OPLUS_FEATURE_WIFI_FTM
         local_defines = ["OPLUS_FEATURE_WIFI_BDF", "OPLUS_FEATURE_WIFI_MAC", "OPLUS_FEATURE_WIFI_FTM", "OPLUS_FEATURE_WIFI_DCS_SWITCH","OPLUS_BUG_STABILITY","OPLUS_FEATURE_CONN_POWER_MONITOR", "OPLUS_FEATURE_WIFI_VENDOR_FT"],
         #endif /*OPLUS_FEATURE_WIFI_FTM*/
-        conditional_srcs = _conditional_srcs,
+        conditional_srcs = combined_conditional_srcs,
         copts = copts,
         out = out,
         kernel_build = kernel_build,
