@@ -614,7 +614,7 @@ int osvelte_lowmem_dbg_init(struct kobject *root, struct proc_dir_entry *proc_ro
 	else
 		cfg->watermark_low = PAGES(SZ_256M);
 	cfg->watermark_slab = PAGES(SZ_1G);
-	cfg->watermark_dmabuf = PAGES(SZ_2G + SZ_512M);
+	cfg->watermark_dmabuf = PAGES(SZ_1G + SZ_512M);
 	cfg->watermark_gpu = PAGES(SZ_2G + SZ_512M);
 	cfg->watermark_other = PAGES(SZ_1G);
 

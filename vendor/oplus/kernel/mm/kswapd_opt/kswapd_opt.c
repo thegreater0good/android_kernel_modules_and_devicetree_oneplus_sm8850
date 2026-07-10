@@ -750,7 +750,7 @@ static ssize_t kswapd_nice_write(struct file *file, const char __user *buf,
 		if (tsk->flags & PF_KTHREAD) {
 			if (!strncmp(tsk->comm, KSWAPD_COMM,
 				     sizeof(KSWAPD_COMM) - 1)) {
-				global_kswapd_pid = tsk -> pid;
+				global_kswapd_pid = tsk->pid;
 				global_kswapd_nice = val;
 				set_user_nice(tsk, val);
 				break;
@@ -836,6 +836,7 @@ static int __init kswapd_opt_init(void)
 	else
 		create_mask_reclaim_proc();
 	create_kswapd_nice_proc();
+
 	pr_info("%s init done\n", __func__);
 	return 0;
 }

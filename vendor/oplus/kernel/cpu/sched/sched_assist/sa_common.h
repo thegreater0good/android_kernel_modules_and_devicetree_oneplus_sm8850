@@ -617,7 +617,7 @@ static inline bool sched_assist_scene(unsigned int scene)
 static inline unsigned long oplus_task_util(struct task_struct *p)
 {
 #if IS_ENABLED(CONFIG_SCHED_WALT)
-	struct walt_task_struct *wts = (struct walt_task_struct *) p->android_vendor_data1;
+	struct walt_task_struct *wts = (struct walt_task_struct *)android_task_vendor_data(p);
 
 	return wts->demand_scaled;
 #else
@@ -628,7 +628,7 @@ static inline unsigned long oplus_task_util(struct task_struct *p)
 #if IS_ENABLED(CONFIG_SCHED_WALT)
 static inline u32 task_wts_sum(struct task_struct *tsk)
 {
-	struct walt_task_struct *wts = (struct walt_task_struct *) tsk->android_vendor_data1;
+	struct walt_task_struct *wts = (struct walt_task_struct *)android_task_vendor_data(tsk);
 
 	return wts->sum;
 }

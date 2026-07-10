@@ -1654,6 +1654,35 @@
             }
         },
         {
+            "lable": "OPLUS_IC_FUNC_BUCK_GET_CC_STATE",
+            "desc": {
+                "zh": "获取CC1合CC2的状态"
+            },
+            "auto_debug_code": true,
+            "parameter_list": ["u8 *", "u8 *"],
+            "parameter_desc": [
+                {
+                    "range": "0-*",
+                    "type": "out",
+                    "desc": {
+                        "zh": "用于存放CC1状态值"
+                    }
+                },
+                {
+                    "range": "0-*",
+                    "type": "out",
+                    "desc": {
+                        "zh": "用于存放CC2的状态值"
+                    }
+                }
+            ],
+            "vict": {
+                "read": false,
+                "write": false,
+                "overwrite": false
+            }
+        },
+        {
             "lable": "OPLUS_IC_FUNC_BUCK_SET_DPDM_OVP_DISABLE",
             "desc": {
                 "zh": "关闭WCD OVP"
@@ -1735,5 +1764,5 @@
         }
     ],
 
-    "version": "V7.1:63:80273c984caef97203d98a6c5eed8501f6edd1c23ab316743235abeab466fa27"
+    "version": "V8.0:64:c961fd8b65f56b4b1d4ddccc2bb6ba951b69517bb7c9becec2f0a061d448f4fd"
 }

@@ -177,6 +177,12 @@ enum {
 	CHARGE_TYPE_OTG,
 };
 
+enum {
+	SY6974B_REALLY_SUSPEND_SET = 0,
+	SY6974B_USBTEMP_DISCHG_SET,
+	SY6974B_HIZ_SET_MAX,
+};
+
 static struct regmap_config sy6974b_regmap_config = {
 	.reg_bits = 8,
 	.val_bits = 8,
@@ -982,6 +988,71 @@ static bool sy6974b_check_really_suspend_charger(struct sy6974b_chip *chip)
 	return hiz;
 }
 
+
+static void sy6974b_fcc_rerun_work(struct work_struct *work)
+{
+	struct delayed_work *dwork = to_delayed_work(work);
+	struct sy6974b_chip *chip = container_of(dwork, struct sy6974b_chip, fcc_rerun_work);
+
+	if (chip && !IS_ERR_OR_NULL(chip->fcc_votable))
+		rerun_election(chip->fcc_votable, false);
+}
+
+static void sy6974b_suspend_charger_extern(struct sy6974b_chip *chip, bool en)
+{
+	if (en) {
+		schedule_delayed_work(&chip->event_work, msecs_to_jiffies(500));
+	} else {
+		msleep(100);
+		sy6974b_input_current_limit_without_aicl(chip, chip->charger_current_pre);
+	}
+	schedule_delayed_work(&chip->ibus_control_work, 0);
+}
+
+static bool sy6974b_check_force_unsuspend_charger(struct sy6974b_chip *chip, bool en)
+{
+	if ((atomic_read(&chip->driver_suspended) == 1) ||
+		((chip->oplus_charger_type == POWER_SUPPLY_TYPE_UNKNOWN) && chip->vbus_present && en) ||
+		((chip->otg_enable == true || atomic_read(&chip->charger_force_unsuspended)) && en)) {
+		return true;
+	} else {
+		return false;
+	}
+}
+
+static int sy6974b_hiz_set(struct sy6974b_chip *chip, bool en, int type)
+{
+	int rc = 0;
+	bool target_en;
+	static int really_suspend_en = 0, usbtemp_dischg_en = 0;
+
+	if (!chip)
+		return -ENODEV;
+
+	if (type == SY6974B_REALLY_SUSPEND_SET) {
+		really_suspend_en = en ? 1 : 0;
+	} else {
+		usbtemp_dischg_en = en ? 1 : 0;
+	}
+
+	target_en = (really_suspend_en || usbtemp_dischg_en);
+
+	chg_info("type=%d, en=%d , status[suspend=%d, usbtemp=%d] -> target=%d\n",
+		 type, en, really_suspend_en, usbtemp_dischg_en, target_en);
+
+	if (target_en == sy6974b_check_really_suspend_charger(chip))
+		return rc;
+
+	rc = sy6974b_write_byte_mask(chip, REG00_SY6974B_ADDRESS,
+		REG00_SY6974B_SUSPEND_MODE_MASK,
+		target_en ? REG00_SY6974B_SUSPEND_MODE_ENABLE : REG00_SY6974B_SUSPEND_MODE_DISABLE);
+
+	if (rc < 0)
+		chg_err("Failed to set HIZ register, rc=%d\n", rc);
+
+	return rc;
+}
+
 static void sy6974b_really_suspend_charger(struct sy6974b_chip *chip, bool en)
 {
 	int rc = 0;
@@ -990,16 +1061,26 @@ static void sy6974b_really_suspend_charger(struct sy6974b_chip *chip, bool en)
 		return;
 	}
 
-	if (atomic_read(&chip->driver_suspended) == 1) {
-		return;
-	}
+	chg_info("sy6974b_really_suspend_charger en:%d\n", en);
 
-	rc = sy6974b_write_byte_mask(chip, REG00_SY6974B_ADDRESS,
-			REG00_SY6974B_SUSPEND_MODE_MASK,
-			en ? REG00_SY6974B_SUSPEND_MODE_ENABLE : REG00_SY6974B_SUSPEND_MODE_DISABLE);
-	if (rc < 0) {
-		chg_err("fail en=%d rc = %d\n", en, rc);
-	}
+#ifndef CONFIG_DISABLE_OPLUS_FUNCTION
+#ifdef CONFIG_OPLUS_CHARGER_MTK
+	if (get_boot_mode() != META_BOOT)
+		sy6974b_hiz_set(chip, en, SY6974B_REALLY_SUSPEND_SET);
+
+	else
+		sy6974b_hiz_set(chip, false, SY6974B_REALLY_SUSPEND_SET);
+
+#else
+	if (!oplus_is_rf_ftm_mode())
+		sy6974b_hiz_set(chip, en, SY6974B_REALLY_SUSPEND_SET);
+	else
+		sy6974b_hiz_set(chip, false, SY6974B_REALLY_SUSPEND_SET);
+#endif
+#endif
+	chip->suspend_check_cnt = FCC_VOTE_CHECK_DEF_VAL*2;
+	sy6974b_suspend_charger_extern(chip, en);
+	return;
 }
 
 int sy6974b_suspend_charger_input(struct sy6974b_chip *chip)
@@ -1411,9 +1492,7 @@ static int sy6974b_set_usbtemp_dischg_enable(struct oplus_chg_ic_dev *ic_dev, bo
 		}
 	}
 
-	rc = sy6974b_write_byte_mask(chip, REG00_SY6974B_ADDRESS,
-			REG00_SY6974B_SUSPEND_MODE_MASK,
-			en ? REG00_SY6974B_SUSPEND_MODE_ENABLE : REG00_SY6974B_SUSPEND_MODE_DISABLE);
+	rc = sy6974b_hiz_set(chip, en, SY6974B_USBTEMP_DISCHG_SET);
 	if (rc < 0) {
 		chg_err("sy6974b_write_byte_mask reg00 failed, rc=%d\n", rc);
 		return rc;
@@ -2491,6 +2570,66 @@ static void sy6974b_bc12_retry_work(struct work_struct *work)
 	} while (!sy6974b_get_iindet(chip));
 	chg_info("BC1.2 complete,delay_cnt=%d\n", chip->bc12_delay_cnt);
 	sy6974b_get_bc12(chip);
+}
+
+static int sy6974b_check_vooc_charging(struct sy6974b_chip *chip)
+{
+	int vooc_charging = 0;
+	union mms_msg_data data = { 0 };
+	int rc;
+
+	if (!chip->vooc_topic)
+		return 0;
+
+	rc = oplus_mms_get_item_data(chip->vooc_topic, VOOC_ITEM_VOOC_CHARGING, &data, true);
+	if (!rc)
+		vooc_charging = data.intval;
+
+	return vooc_charging;
+}
+
+static int check_is_user_suspend_charger(struct sy6974b_chip *chip)
+{
+	if (!chip)
+		return 0;
+
+	if (!chip->suspend_votable)
+		chip->suspend_votable = find_votable("WIRED_CHARGE_SUSPEND");
+	if (chip->suspend_votable)
+		return get_client_vote(chip->suspend_votable, USER_VOTER);
+	return 0;
+}
+
+static void vooc_charging_suspend_work(struct work_struct *work)
+{
+	struct delayed_work *dwork = to_delayed_work(work);
+	struct sy6974b_chip *chip = container_of(dwork, struct sy6974b_chip, vooc_suspend_work);
+	union mms_msg_data data = { 0 };
+	int hiz = 0;
+	int rc = 0;
+
+	chip->vooc_charging = sy6974b_check_vooc_charging(chip);
+	rc = oplus_mms_get_item_data(chip->cpa_topic, CPA_ITEM_ALLOW, &data, false);
+	if (rc < 0)
+		return;
+	chip->cpa_current_type = data.intval;
+
+	chg_info("cpa_current_type:%d, vooc_charging:%d, vbus:%d\n",
+		chip->cpa_current_type, chip->vooc_charging, chip->vbus_present);
+
+	if ((chip->cpa_current_type == CHG_PROTOCOL_VOOC) &&
+		(chip->vooc_charging == false) &&
+		(chip->vbus_present) &&
+		(!check_is_user_suspend_charger(chip))) {
+		hiz = sy6974b_check_really_suspend_charger(chip);
+		if (hiz)
+			sy6974b_really_suspend_charger(chip, false);
+		atomic_set(&chip->charger_force_unsuspended, 1);
+		schedule_delayed_work(&chip->vooc_suspend_work, msecs_to_jiffies(500));
+	} else if (atomic_read(&chip->charger_suspended) == 1) {
+		atomic_set(&chip->charger_force_unsuspended, 0);
+		sy6974b_rerun_suspend(chip);
+	}
 }
 
 static void sy6974b_pre_event_work(struct work_struct *work)
