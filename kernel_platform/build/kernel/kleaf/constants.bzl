@@ -26,7 +26,6 @@ _common_outs = [
     "modules.builtin",
     "modules.builtin.modinfo",
     "vmlinux",
-    "vmlinux_oki",
     "vmlinux.symvers",
 ]
 

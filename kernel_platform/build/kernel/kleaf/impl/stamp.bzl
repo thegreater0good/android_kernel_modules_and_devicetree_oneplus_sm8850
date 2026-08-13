@@ -85,13 +85,12 @@ def _write_localversion(ctx):
                 exit 1
             fi
             scmversion=""
-            oki_infix="o"
             stable_scmversion=$({stable_scmversion_cmd})
             scmversion_prefix=
             if [[ "$android_release" == "mainline" ]]; then
                 scmversion_prefix="-mainline"
             elif [[ -n "$android_release" ]] && [[ -n "$KMI_GENERATION" ]]; then
-                scmversion_prefix="-$android_release-$KMI_GENERATION-$oki_infix"
+                scmversion_prefix="-$android_release-$KMI_GENERATION"
             elif [[ -n "$android_release" ]] && [[ -z "$KMI_GENERATION" ]]; then
                 echo "KMI_GENERATION is not set but BRANCH is ${{BRANCH}}" >&2
                 exit 1
