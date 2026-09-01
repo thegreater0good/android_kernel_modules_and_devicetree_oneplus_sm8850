@@ -294,9 +294,14 @@ for EXT_MOD in ${EXT_MODULES}; do
   if [[ "$DTB_COMPILE" == 1 ]];then
     rm -rf ${STAG_EXT_MOD}/* || true
     cp -ardf ${EXT_MOD}/* ${STAG_EXT_MOD}/
-    rm -rf ${ROOT_DIR}/Kbuild
-    python ${ROOT_DIR}/build/kernel/android/modify_dt_kbuild.py ${KERNEL_KIT}/.config ${STAG_EXT_MOD}/Kbuild
-    mv "${ROOT_DIR}/Kbuild" ${STAG_EXT_MOD}/Kbuild
+    DT_KBUILD_TMP="${COMMON_OUT_DIR}/dt-kbuild-tmp"
+    rm -rf "${DT_KBUILD_TMP}"
+    mkdir -p "${DT_KBUILD_TMP}"
+    (
+        cd "${DT_KBUILD_TMP}"
+        python ${ROOT_DIR}/build/kernel/android/modify_dt_kbuild.py ${KERNEL_KIT}/.config ${STAG_EXT_MOD}/Kbuild
+    )
+    mv "${DT_KBUILD_TMP}/Kbuild" ${STAG_EXT_MOD}/Kbuild
   fi
 
   module_path="$(echo "$EXT_MOD" | sed -e 's/^[\.\/]*//')"
@@ -309,7 +314,9 @@ for EXT_MOD in ${EXT_MODULES}; do
     back_path=$(printf '../%.0s' $(seq 1 $levels))
 
   # Create a link to the module's tree within kernel_platform
-    (cd "$ROOT_DIR" && ln -fs "${back_path}${top_dir}")
+    if [ ! -e "${ROOT_DIR}/${top_dir}" ] && [ ! -L "${ROOT_DIR}/${top_dir}" ]; then
+      (cd "$ROOT_DIR" && ln -s "${back_path}${top_dir}")
+    fi
 
   # Search for the module package by looking up from the module_path
   pkg_path="$module_path"
