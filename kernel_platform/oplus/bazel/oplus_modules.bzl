@@ -174,6 +174,19 @@ def define_oplus_ddk_modules(target, msm_target, variant):
             "//vendor/oplus/kernel/dfr:oplus_inject",
         ]
 
+    lineage_oplus_ddk_targets = [
+        module
+        for module in oplus_ddk_targets
+        if module != "//vendor/oplus/kernel/network:oplus_network_data_module"
+    ]
+
+    pkg_files(
+        name = "{}_lineage_oplus_ddk_modules_files".format(target),
+        srcs = lineage_oplus_ddk_targets,
+        strip_prefix = strip_prefix.files_only(),
+        visibility = ["//visibility:public"],
+    )
+
     pkg_files(
         name = "{}_all_oplus_ddk_modules_files".format(target),
         srcs = oplus_ddk_targets,
