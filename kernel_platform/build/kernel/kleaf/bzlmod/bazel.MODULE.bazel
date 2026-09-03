@@ -79,6 +79,11 @@ kleaf_local_repository(
     path = "external/kmod",
 )
 
+kleaf_local_repository(
+    name = "infiniti_kernel_prebuilts",
+    path = "../../infiniti-kernel-prebuilts",
+)
+
 new_kleaf_local_repository(
     name = "prebuilt_ndk",
     build_file = "build/kernel/kleaf/ndk.BUILD",
