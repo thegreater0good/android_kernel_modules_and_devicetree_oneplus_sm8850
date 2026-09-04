@@ -24,19 +24,17 @@ dependency_config = [
 	"CONFIG_MSM_MMRM=y",
 ]
 
-project_configs = select({
-    # Project-specific configs
-    ":no_project": [],
-    ":pineapple": dependency_config + [
+project_configs = {
+    "pineapple": dependency_config + [
         "CONFIG_SPECTRA_SECURE_CAMNOC_REG_UPDATE=y",
     ],
-    ":sun": dependency_config + [
+    "sun": dependency_config + [
         "CONFIG_SPECTRA_SECURE_CAMNOC_REG_UPDATE=y",
     ],
-    ":canoe": dependency_config + [
+    "canoe": dependency_config + [
         "CONFIG_SPECTRA_POWER_DOMAIN_SET_HW_MODE=y",
-     ],
-})
+    ],
+}
 
 """
 Return a label which defines a project-specific defconfig snippet to be
@@ -45,11 +43,12 @@ applied on top of the platform defconfig.
 
 def get_project_defconfig(target, variant):
     rule_name = "{}_{}_project_defconfig".format(target, variant)
+    project = target.split("-")[0]
 
     write_file(
         name = rule_name,
         out = "{}.generated".format(rule_name),
-        content = common_configs + project_configs + [""],
+        content = common_configs + project_configs.get(project, []) + [""],
     )
 
     return rule_name
